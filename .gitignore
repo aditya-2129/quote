@@ -59,3 +59,13 @@ Icon?
 .AppleDB
 .TemporaryItems
 ehthumbs.db
+
+# IDE & Editor Addition
+.claude/
+
+# Logs Addition
+errors.txt
+
+# Project Specific
+design_bundle/
+design_extracted.json
