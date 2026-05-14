@@ -1,1 +1,0 @@
-export { useWindow } from "./useWindow";

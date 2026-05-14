@@ -1,0 +1,1382 @@
+/* global React, Icon */
+const { useState: useState_q, useMemo } = React;
+
+/* -----------------------------------------------------------
+   Reference data
+   ----------------------------------------------------------- */
+
+const MATERIALS = {
+  "al-6061":    { label: "Aluminum 6061-T6", rate: 5.50, density: 2700, machinability: 4, hex: "#bfc7d1", grade: "T6 temper · UNS A96061",   forms: ["plate", "bar", "extrusion"] },
+  "steel-1018": { label: "Steel 1018",       rate: 2.10, density: 7870, machinability: 3, hex: "#8d959c", grade: "Low-carbon · cold-rolled",   forms: ["plate", "bar"] },
+  "brass":      { label: "Brass CW614N",     rate: 8.40, density: 8500, machinability: 5, hex: "#c69f5a", grade: "Free-machining · leaded",     forms: ["bar", "tube"] },
+  "ss-304":     { label: "Stainless 304",    rate: 6.80, density: 8000, machinability: 2, hex: "#a8b0b8", grade: "Austenitic · corrosion-grade", forms: ["plate", "bar", "tube"] },
+  "stock":      { label: "Stock / purchased", rate: 0,   density: 1000, machinability: 0, hex: "#dcd9d2", grade: "Purchased · not machined",   forms: ["—"] },
+};
+
+const MACHINES = {
+  "mill-3ax": { label: "Mill · 3-axis",    rate: 68,  short: "Mill 3-ax" },
+  "mill-5ax": { label: "Mill · 5-axis",    rate: 110, short: "Mill 5-ax" },
+  "lathe":    { label: "Lathe",            rate: 58,  short: "Lathe" },
+  "drill":    { label: "Drill press",      rate: 38,  short: "Drill" },
+  "tap":      { label: "Tap / thread",     rate: 38,  short: "Tap" },
+  "wire-edm": { label: "Wire EDM",         rate: 95,  short: "Wire EDM" },
+  "grind":    { label: "Surface grind",    rate: 72,  short: "Grind" },
+  "deburr":   { label: "Deburr / hand",    rate: 28,  short: "Deburr" },
+  "inspect":  { label: "CMM inspect",      rate: 64,  short: "CMM" },
+};
+
+let __opSeq = 100;
+const opId = () => `op-${++__opSeq}`;
+
+const PARTS = [
+  {
+    id: "body-base", name: "Body · base plate",  color: "#7b8a9f",
+    material: "al-6061", perAssembly: 1, mass: 0.221, finishing: 1.20, included: true,
+    stock: { shape: "plate", dims: { L: 240, W: 130, H: 28 } },
+    operations: [
+      { id: opId(), machine: "mill-3ax", setupMin: 18, cycleMin: 6.0 },
+      { id: opId(), machine: "drill",    setupMin: 4,  cycleMin: 2.0 },
+      { id: opId(), machine: "deburr",   setupMin: 0,  cycleMin: 0.8 },
+    ],
+  },
+  {
+    id: "body-mid",  name: "Body · mid block",   color: "#9ca5b3",
+    material: "al-6061", perAssembly: 1, mass: 0.158, finishing: 1.20, included: true,
+    stock: { shape: "block", dims: { L: 160, W: 90, H: 45 } },
+    operations: [
+      { id: opId(), machine: "mill-3ax", setupMin: 14, cycleMin: 5.0 },
+      { id: opId(), machine: "drill",    setupMin: 3,  cycleMin: 1.5 },
+    ],
+  },
+  {
+    id: "body-cap",  name: "Body · cap",         color: "#2f4f7d",
+    material: "steel-1018", perAssembly: 1, mass: 0.124, finishing: 1.60, included: true,
+    stock: { shape: "block", dims: { L: 85, W: 50, H: 28 } },
+    operations: [
+      { id: opId(), machine: "mill-3ax", setupMin: 12, cycleMin: 4.0 },
+      { id: opId(), machine: "drill",    setupMin: 3,  cycleMin: 1.0 },
+      { id: opId(), machine: "tap",      setupMin: 4,  cycleMin: 1.0 },
+      { id: opId(), machine: "deburr",   setupMin: 0,  cycleMin: 0.5 },
+    ],
+  },
+  {
+    id: "fastener",  name: "M6×12 hex socket",   color: "#c0c0c0",
+    material: "stock", perAssembly: 4, mass: 0.008, finishing: 0, included: true, stocked: true,
+    stock: null,
+    operations: [],
+  },
+  {
+    id: "oring",     name: "O-ring 18×2 NBR",    color: "#1f1f1f",
+    material: "stock", perAssembly: 1, mass: 0.002, finishing: 0, included: false, stocked: true,
+    stock: null,
+    operations: [],
+  },
+];
+
+const TOOLING_BATCH = 244;
+const INSPECTION_BATCH = 326;
+
+const DFM_ISSUES = [
+  {
+    id: "dfm-1", partId: "body-cap", severity: "error",
+    title: "Wall thickness 0.8 mm",
+    desc: "Below 1.0 mm minimum for steel machining around the cap perimeter. Risk of deflection during finishing pass.",
+    impact: 90,
+    suggest: "Increase wall to ≥ 1.0 mm or accept reduced batch yield",
+    actionable: true,
+  },
+  {
+    id: "dfm-2", partId: "body-cap", severity: "warn",
+    title: "Internal corner radius 0.5 mm",
+    desc: "Below tool minimum for 3-axis mill. Adds tool-change time or forces 5-axis path.",
+    impact: 120,
+    suggest: "Relax to R1.0 mm or switch mill op to 5-axis",
+    actionable: true,
+  },
+  {
+    id: "dfm-3", partId: "body-mid", severity: "warn",
+    title: "Deep pocket · 18 × 12 × 32 mm",
+    desc: "Aspect ratio > 2.5 requires long-reach tooling. Adds cycle time and tooling cost.",
+    impact: 60,
+    suggest: "Confirm pocket depth — drawing rev C tolerance",
+    actionable: false,
+  },
+  {
+    id: "dfm-4", partId: "body-cap", severity: "info",
+    title: "Tap depth 3.2 × diameter",
+    desc: "Above standard 2.5× for M6 — adds tap breakage risk and inspection time.",
+    impact: 40,
+    suggest: "Verify thread engagement with customer",
+    actionable: false,
+  },
+];
+
+/* -----------------------------------------------------------
+   Costing
+   ----------------------------------------------------------- */
+
+const SHAPES = {
+  "plate":      { label: "Plate",      dims: ["L", "W", "H"] },
+  "block":      { label: "Block",      dims: ["L", "W", "H"] },
+  "round-bar":  { label: "Round bar",  dims: ["D", "L"] },
+  "square-bar": { label: "Square bar", dims: ["side", "L"] },
+  "tube":       { label: "Tube",       dims: ["OD", "ID", "L"] },
+};
+
+function stockVolumeMm3(stock) {
+  if (!stock) return 0;
+  const { shape, dims } = stock;
+  switch (shape) {
+    case "plate":
+    case "block":
+      return (dims.L || 0) * (dims.W || 0) * (dims.H || 0);
+    case "round-bar":
+      return Math.PI * Math.pow((dims.D || 0) / 2, 2) * (dims.L || 0);
+    case "square-bar":
+      return Math.pow(dims.side || 0, 2) * (dims.L || 0);
+    case "tube": {
+      const ro = (dims.OD || 0) / 2;
+      const ri = (dims.ID || 0) / 2;
+      return Math.PI * (ro*ro - ri*ri) * (dims.L || 0);
+    }
+    default: return 0;
+  }
+}
+
+function stockMassKg(stock, materialId) {
+  const density = MATERIALS[materialId]?.density ?? 0;
+  // dims are in mm, density in kg/m³  →  mm³ × 1e-9 = m³
+  return stockVolumeMm3(stock) * 1e-9 * density;
+}
+
+function stockUtilization(part) {
+  if (!part.stock || part.stocked) return null;
+  const sm = stockMassKg(part.stock, part.material);
+  if (sm <= 0) return null;
+  return part.mass / sm;
+}
+
+const partQty = (p, asmQty) => p.perAssembly * asmQty;
+
+function opCost(op, qty) {
+  const rate = MACHINES[op.machine]?.rate ?? 0;
+  return (op.setupMin / 60) * rate + (op.cycleMin / 60) * rate * qty;
+}
+function opMinutes(op, qty) { return op.setupMin + op.cycleMin * qty; }
+
+function partMachineCost(p, asmQty) {
+  const qty = partQty(p, asmQty);
+  return (p.operations || []).reduce((a, op) => a + opCost(op, qty), 0);
+}
+function partMaterialCost(p, asmQty) {
+  const matRate = MATERIALS[p.material]?.rate ?? 0;
+  // for purchased / stocked parts, use net mass × rate (rate captures unit cost)
+  // for machined parts, use stock mass × rate (you pay for the block, chips and all)
+  const mass = (p.stocked || !p.stock) ? p.mass : stockMassKg(p.stock, p.material);
+  return mass * matRate * partQty(p, asmQty);
+}
+function partFinishCost(p, asmQty) {
+  return p.finishing * partQty(p, asmQty);
+}
+function partSubtotal(p, asmQty) {
+  if (!p.included) return 0;
+  return partMaterialCost(p, asmQty) + partMachineCost(p, asmQty) + partFinishCost(p, asmQty);
+}
+
+function rollup(parts, asmQty, commercial) {
+  const partsCost = parts.reduce((a, p) => a + partSubtotal(p, asmQty), 0);
+  const tooling = TOOLING_BATCH;
+  const inspection = INSPECTION_BATCH;
+  const subtotal = partsCost + tooling + inspection;
+  const margin = subtotal * ((commercial?.marginPct ?? 0) / 100);
+  const tax = (subtotal + margin) * ((commercial?.taxPct ?? 0) / 100);
+  const total = subtotal + margin + tax;
+  return { partsCost, tooling, inspection, subtotal, margin, tax, total };
+}
+
+function fmtEUR(n) { return "€ " + n.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtEUR0(n) { return "€ " + n.toLocaleString("en", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function fmtMin(n) { return n.toLocaleString("en", { minimumFractionDigits: 0, maximumFractionDigits: 1 }); }
+function fmtPct(n) { return (n >= 0 ? "+" : "") + n.toFixed(1) + "%"; }
+
+/* -----------------------------------------------------------
+   Shape icon — tiny SVG primitives per stock shape
+   ----------------------------------------------------------- */
+
+function ShapeIcon({ shape, size = 14 }) {
+  const s = size;
+  const stroke = "currentColor";
+  const sw = 1.25;
+  switch (shape) {
+    case "plate":
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="6.5" width="12" height="3" rx="0.5" stroke={stroke} strokeWidth={sw}/>
+        </svg>
+      );
+    case "block":
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" fill="none">
+          <rect x="3" y="4" width="10" height="8" rx="0.5" stroke={stroke} strokeWidth={sw}/>
+          <line x1="3" y1="6" x2="13" y2="6" stroke={stroke} strokeWidth={sw} opacity="0.5"/>
+        </svg>
+      );
+    case "round-bar":
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="6" width="12" height="4" rx="2" stroke={stroke} strokeWidth={sw}/>
+        </svg>
+      );
+    case "square-bar":
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="6" width="12" height="4" stroke={stroke} strokeWidth={sw}/>
+        </svg>
+      );
+    case "tube":
+      return (
+        <svg width={s} height={s} viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="5" width="12" height="6" rx="3" stroke={stroke} strokeWidth={sw}/>
+          <rect x="4" y="6.5" width="8" height="3" rx="1.5" stroke={stroke} strokeWidth={sw} opacity="0.55"/>
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+/* -----------------------------------------------------------
+   Stock editor (in the rail Material section)
+   ----------------------------------------------------------- */
+
+function StockEditor({ part, onChange }) {
+  if (!part || part.stocked) return null;
+  const stock = part.stock || { shape: "block", dims: { L: 50, W: 50, H: 20 } };
+  const cfg = SHAPES[stock.shape] || SHAPES.block;
+
+  function updateShape(newShape) {
+    const newCfg = SHAPES[newShape];
+    // seed dims from existing where they overlap, otherwise sensible defaults
+    const defaults = { L: 80, W: 50, H: 25, D: 30, side: 30, OD: 30, ID: 20 };
+    const newDims = {};
+    newCfg.dims.forEach(k => {
+      newDims[k] = stock.dims?.[k] != null ? stock.dims[k] : defaults[k];
+    });
+    onChange({ stock: { shape: newShape, dims: newDims } });
+  }
+
+  function updateDim(key, val) {
+    onChange({ stock: { ...stock, dims: { ...stock.dims, [key]: val } } });
+  }
+
+  const sm = stockMassKg(stock, part.material);
+  const util = sm > 0 ? (part.mass / sm) * 100 : 0;
+  const waste = Math.max(0, sm - part.mass);
+  const utilClass = util >= 50 ? "good" : util >= 25 ? "warn" : "poor";
+
+  const unitFor = (k) => "mm";
+
+  return (
+    <div className="stock-block">
+      <div className="stock-head">
+        <span className="eyebrow">Stock shape</span>
+        <span className={`util-pill ${utilClass}`}>
+          <Icon name="percent" size={10}/> {util.toFixed(0)}% utilization
+        </span>
+      </div>
+
+      <div className="shape-picker">
+        {Object.entries(SHAPES).map(([id, s]) => (
+          <button
+            key={id}
+            className={stock.shape === id ? "on" : ""}
+            onClick={() => updateShape(id)}
+            title={s.label}
+          >
+            <span className="shape-ic"><ShapeIcon shape={id} size={14}/></span>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      <div className={`dim-grid ${cfg.dims.length === 3 ? "three" : "two"}`}>
+        {cfg.dims.map(k => (
+          <div className="field" key={k}>
+            <label>{k}</label>
+            <div className="suffix">
+              <input
+                type="number"
+                min="0"
+                value={stock.dims?.[k] ?? 0}
+                onChange={(e) => updateDim(k, +e.target.value || 0)}
+              />
+              <span className="unit">{unitFor(k)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="stock-summary">
+        <div className="cell">
+          <span className="lbl">Stock mass</span>
+          <span className="val">{sm.toFixed(3)} kg</span>
+        </div>
+        <div className="cell center">
+          <span className="lbl">Net part</span>
+          <span className="val">{part.mass.toFixed(3)} kg</span>
+        </div>
+        <div className="cell right">
+          <span className="lbl">Waste (chip)</span>
+          <span className="val">{waste.toFixed(3)} kg</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   Lead time
+   ----------------------------------------------------------- */
+
+function addBusinessDays(start, n) {
+  const d = new Date(start);
+  let added = 0;
+  while (added < n) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return d;
+}
+function fmtShipDate(d) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
+}
+
+function computeLeadTime(parts, asmQty) {
+  let totalMachineMin = 0;
+  parts.forEach(p => {
+    if (!p.included) return;
+    (p.operations || []).forEach(op => {
+      totalMachineMin += opMinutes(op, partQty(p, asmQty));
+    });
+  });
+  const machineHours = totalMachineMin / 60;
+  const queue   = 3;
+  const machine = Math.max(2, Math.ceil(machineHours / 6));   // 6 productive h / day
+  const finish  = parts.some(p => p.included && p.finishing > 0) ? 3 : 0;
+  const ship    = 2;
+  const total   = queue + machine + finish + ship;
+  return { queue, machine, finish, ship, total, shipDate: addBusinessDays(new Date(), total) };
+}
+
+/* -----------------------------------------------------------
+   Material library mini-card
+   ----------------------------------------------------------- */
+
+function MachinabilityBars({ rating }) {
+  return (
+    <span className="machinability">
+      Machinability
+      <span className="bars">
+        {[1,2,3,4,5].map(i => (
+          <span key={i} className={i <= rating ? "fill" : ""}></span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function MaterialCard({ materialId }) {
+  const m = MATERIALS[materialId];
+  if (!m) return null;
+  return (
+    <div className="material-card">
+      <span className="swatch" style={{ background: m.hex }}></span>
+      <div className="body">
+        <div className="name">{m.label}</div>
+        <div className="grade">{m.grade}</div>
+        <div className="specs">
+          <div><span className="k">Density</span><span className="v">{m.density.toLocaleString()} kg/m³</span></div>
+          <div><span className="k">Rate</span><span className="v">€ {m.rate.toFixed(2)} / kg</span></div>
+          <div><span className="k">Stock forms</span><span className="v" style={{ fontSize: 10.5 }}>{m.forms.join(", ")}</span></div>
+        </div>
+        <MachinabilityBars rating={m.machinability} />
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   Clickable preview
+   ----------------------------------------------------------- */
+
+function QuotePreview({ parts, selectedId, onSelect }) {
+  const c30 = Math.cos(Math.PI/6), s30 = Math.sin(Math.PI/6);
+
+  function cuboid(id, cx, cy, w, h, d, opts={}) {
+    const half = { x: (w/2)*c30, y: (w/2)*s30 };
+    const dep  = { x: (d/2)*c30, y: -(d/2)*s30 };
+    const A = [cx - half.x - dep.x, cy - h/2 - half.y - dep.y];
+    const B = [cx + half.x - dep.x, cy - h/2 + half.y - dep.y];
+    const C = [cx + half.x + dep.x, cy - h/2 + half.y + dep.y];
+    const D = [cx - half.x + dep.x, cy - h/2 - half.y + dep.y];
+    const A2 = [A[0], A[1] + h];
+    const B2 = [B[0], B[1] + h];
+    const C2 = [C[0], C[1] + h];
+
+    const part = parts.find(p => p.id === id);
+    const isSel = selectedId === id;
+    const excluded = part && !part.included;
+    const opacity = excluded ? 0.35 : 1;
+
+    const top = opts.top || "#c8d0db";
+    const left = opts.left || "#a8b1be";
+    const right = opts.right || "#8e98a6";
+    const edge = isSel ? "#2f4f7d" : "#1e2734";
+    const sw = isSel ? 1.4 : 0.5;
+
+    const poly = (pts, fill) => (
+      <polygon points={pts.map(p=>p.join(",")).join(" ")} fill={fill} stroke={edge} strokeWidth={sw} strokeLinejoin="round"/>
+    );
+
+    // tiny DFM badge on bodies with issues
+    const issueCount = DFM_ISSUES.filter(i => i.partId === id).length;
+    const worstSev = DFM_ISSUES.filter(i => i.partId === id)
+      .reduce((acc, i) => i.severity === "error" ? "error" : (acc === "error" ? "error" : (i.severity === "warn" ? "warn" : acc)), "info");
+
+    return (
+      <g
+        key={id}
+        data-part={id}
+        onClick={(e) => { e.stopPropagation(); onSelect(id); }}
+        style={{ opacity }}
+      >
+        {poly([A, B, C, D], top)}
+        {poly([A, B, B2, A2], left)}
+        {poly([B, C, C2, B2], right)}
+        {isSel && (
+          <rect
+            x={Math.min(A[0],A2[0]) - 6}
+            y={A[1] - 6}
+            width={Math.abs(C[0]-A[0]) + 12}
+            height={h + Math.abs(C[1]-A[1]) + 12}
+            fill="none" stroke="#2f4f7d" strokeWidth="1"
+            strokeDasharray="4 3" opacity="0.7" rx="2" pointerEvents="none"
+          />
+        )}
+        {issueCount > 0 && (
+          <g pointerEvents="none">
+            <circle cx={C[0] + 6} cy={C[1] - 2} r="7" fill={worstSev === "error" ? "#b54a3b" : worstSev === "warn" ? "#b48241" : "#5d80c9"} />
+            <text x={C[0] + 6} y={C[1] + 1} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#fff">{issueCount}</text>
+          </g>
+        )}
+      </g>
+    );
+  }
+
+  return (
+    <div className="canvas" style={{ flex: 1, minHeight: 0 }} onClick={() => onSelect(null)}>
+      <div className="canvas-grid"></div>
+      <div className="canvas-hud-top">
+        <span className="pill"><Icon name="box" size={11}/> Pump Manifold v3</span>
+        <span className="pill">Click a body to edit its inputs</span>
+      </div>
+      <div className="canvas-content">
+        <svg viewBox="0 0 480 320" width="100%" height="100%" style={{ maxWidth: 460, maxHeight: 300 }}>
+          <defs>
+            <filter id="ds2" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="8" floodColor="#000" floodOpacity="0.10"/>
+            </filter>
+          </defs>
+          <g filter="url(#ds2)" transform="translate(0,30)">
+            {cuboid("body-base", 240, 215, 230, 24, 120)}
+            {cuboid("body-mid",  240, 170, 150, 38, 80,  { top:"#d4dbe5", left:"#b3bcc9", right:"#97a1af" })}
+            {cuboid("body-cap",  240, 120, 80, 26, 44,   { top:"#3b5a86", left:"#2f4f7d", right:"#24416b" })}
+          </g>
+        </svg>
+      </div>
+      <div className="canvas-hud-bot">
+        <button className="zoom-btn"><Icon name="minus" size={12}/></button>
+        <span className="zoom-val">100%</span>
+        <button className="zoom-btn"><Icon name="plus" size={12}/></button>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   Parts table
+   ----------------------------------------------------------- */
+
+function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery }) {
+  const [filter, setFilter] = useState_q("all");      // all | machined | purchased | excluded
+  const [bulkOpen, setBulkOpen] = useState_q(false);
+  const bulkRef = React.useRef(null);
+
+  React.useEffect(() => {
+    function onDoc(e) {
+      if (bulkOpen && bulkRef.current && !bulkRef.current.contains(e.target)) setBulkOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [bulkOpen]);
+
+  const includedCount = parts.filter(p => p.included).length;
+  const machinedCount = parts.filter(p => !p.stocked).length;
+  const purchasedCount = parts.filter(p => p.stocked).length;
+  const excludedCount = parts.filter(p => !p.included).length;
+
+  // Apply filter + search
+  const q = (searchQuery || "").trim().toLowerCase();
+  const filtered = parts.filter(p => {
+    if (filter === "machined"  && p.stocked)  return false;
+    if (filter === "purchased" && !p.stocked) return false;
+    if (filter === "excluded"  && p.included) return false;
+    if (q) {
+      const hay = `${p.name} ${p.id} ${MATERIALS[p.material]?.label || ""}`.toLowerCase();
+      const opsMatch = (p.operations || []).some(op =>
+        (MACHINES[op.machine]?.label || "").toLowerCase().includes(q)
+      );
+      if (!hay.includes(q) && !opsMatch) return false;
+    }
+    return true;
+  });
+
+  const totalAmount = filtered.reduce((a, p) => a + partSubtotal(p, asmQty), 0);
+
+  function update(id, patch) {
+    setParts(parts.map(p => p.id === id ? { ...p, ...patch } : p));
+  }
+  function bulkApply(patch) {
+    const visibleIds = new Set(filtered.map(p => p.id));
+    setParts(parts.map(p => visibleIds.has(p.id) ? { ...p, ...patch } : p));
+    setBulkOpen(false);
+  }
+
+  return (
+    <div className="panel parts-panel">
+      <div className="panel-head">
+        <span className="title">Parts in quote</span>
+        <span className="sub">{includedCount} of {parts.length} included · {asmQty} assemblies</span>
+        <div className="right">
+          <button className="btn sm ghost"><Icon name="plus" size={12}/> Add part</button>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <button className={`filter-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+          All <span className="count">{parts.length}</span>
+        </button>
+        <button className={`filter-chip ${filter === "machined" ? "on" : ""}`} onClick={() => setFilter("machined")}>
+          Machined <span className="count">{machinedCount}</span>
+        </button>
+        <button className={`filter-chip ${filter === "purchased" ? "on" : ""}`} onClick={() => setFilter("purchased")}>
+          Purchased <span className="count">{purchasedCount}</span>
+        </button>
+        {excludedCount > 0 && (
+          <button className={`filter-chip ${filter === "excluded" ? "on" : ""}`} onClick={() => setFilter("excluded")}>
+            Excluded <span className="count">{excludedCount}</span>
+          </button>
+        )}
+
+        <div className="bulk-wrap" ref={bulkRef}>
+          <button className="btn sm" onClick={() => setBulkOpen(!bulkOpen)}>
+            <Icon name="layers" size={12}/> Bulk apply
+            <Icon name="chevron-down" size={11} style={{ marginLeft: 2, color: "var(--text-3)" }}/>
+          </button>
+          {bulkOpen && (
+            <div className="bulk-menu" role="menu">
+              <div className="section">Apply to {filtered.length} visible parts</div>
+              <div className="section" style={{ paddingTop: 0 }}>Material</div>
+              {Object.entries(MATERIALS).filter(([k]) => k !== "stock").map(([k, v]) => (
+                <div className="opt" key={k} onClick={() => bulkApply({ material: k })}>
+                  <span className="swatch" style={{ background: v.hex }}></span>
+                  <span>{v.label}</span>
+                </div>
+              ))}
+              <div className="div"></div>
+              <div className="opt" onClick={() => bulkApply({ included: true })}>
+                <Icon name="check" size={13}/> Include all visible
+              </div>
+              <div className="opt danger" onClick={() => bulkApply({ included: false })}>
+                <Icon name="x" size={13}/> Exclude all visible
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="filter-search">
+          <span className="ic"><Icon name="search" size={12}/></span>
+          <input
+            placeholder="Filter rows…"
+            value={searchQuery || ""}
+            readOnly
+            title="Use the global search at the top"
+          />
+        </div>
+      </div>
+
+      <table className="parts-table">
+        <thead>
+          <tr>
+            <th className="include-cell"></th>
+            <th>Body</th>
+            <th>Material</th>
+            <th className="num">Per asm</th>
+            <th className="num">Qty</th>
+            <th>Machining</th>
+            <th className="num">Subtotal</th>
+            <th style={{ width: 32 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 && (
+            <tr><td colSpan="8">
+              <div className="empty-state" style={{ padding: "30px 18px" }}>
+                <div className="es-ic"><Icon name="search-x" size={18}/></div>
+                <div className="es-title">No parts match the filter</div>
+                <div className="es-hint">Clear the search or pick a different filter chip to see more rows.</div>
+              </div>
+            </td></tr>
+          )}
+          {filtered.map(p => {
+            const qty = partQty(p, asmQty);
+            const sub = partSubtotal(p, asmQty);
+            const isSel = selectedId === p.id;
+            const totalMin = (p.operations || []).reduce((a, op) => a + opMinutes(op, qty), 0);
+            const ops = p.operations || [];
+            const machineTags = ops.slice(0, 3).map(o => MACHINES[o.machine]?.short || o.machine);
+            return (
+              <tr
+                key={p.id}
+                className={`${isSel ? "sel" : ""} ${!p.included ? "excluded" : ""}`}
+                onClick={() => onSelect(p.id)}
+              >
+                <td className="include-cell" onClick={(e)=>e.stopPropagation()}>
+                  <input type="checkbox" checked={p.included} onChange={() => update(p.id, { included: !p.included })} />
+                </td>
+                <td>
+                  <div className="body-cell">
+                    <span className="swatch" style={{ background: p.color }}></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="pname">{p.name}</div>
+                      <div className="pmeta">
+                        #{p.id}{p.stocked ? " · purchased" : " · machined"}
+                        {!p.stocked && p.stock && (
+                          <span className="stock-badge" style={{ marginLeft: 8 }}>
+                            <span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>
+                            {SHAPES[p.stock.shape]?.dims.map(k => p.stock.dims[k]).join("×")} mm
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td onClick={(e)=>e.stopPropagation()}>
+                  <select value={p.material} onChange={(e) => update(p.id, { material: e.target.value })}>
+                    {Object.entries(MATERIALS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+                  </select>
+                </td>
+                <td className="num" onClick={(e)=>e.stopPropagation()}>
+                  <input
+                    type="number"
+                    className="qty-input"
+                    value={p.perAssembly}
+                    onChange={(e) => update(p.id, { perAssembly: +e.target.value || 0 })}
+                  />
+                </td>
+                <td className="num muted">{qty}</td>
+                <td>
+                  {ops.length === 0 ? (
+                    <span className="muted" style={{ fontSize: 11 }}>—</span>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span className="ops-pill">
+                        <Icon name="cog" size={10}/> {fmtMin(totalMin)} min · {ops.length} ops
+                      </span>
+                      <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>
+                        {machineTags.join(" · ")}{ops.length > 3 ? ` +${ops.length-3}` : ""}
+                      </span>
+                    </div>
+                  )}
+                </td>
+                <td className="num">{p.included ? fmtEUR(sub) : "—"}</td>
+                <td onClick={(e)=>e.stopPropagation()}>
+                  <button className="more-btn" title="More"><Icon name="more-horizontal" size={14}/></button>
+                </td>
+              </tr>
+            );
+          })}
+          <tr className="totals">
+            <td colSpan="6" style={{ color: "var(--text-3)" }}>Filtered subtotal · {filtered.length} of {parts.length} parts</td>
+            <td className="num">{fmtEUR(totalAmount)}</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   Operations editor with reorder
+   ----------------------------------------------------------- */
+
+function OperationsEditor({ part, qty, onChange }) {
+  function update(id, patch) {
+    onChange({ operations: part.operations.map(op => op.id === id ? { ...op, ...patch } : op) });
+  }
+  function remove(id) {
+    onChange({ operations: part.operations.filter(op => op.id !== id) });
+  }
+  function move(i, dir) {
+    const list = part.operations.slice();
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    onChange({ operations: list });
+  }
+  function add() {
+    onChange({
+      operations: [
+        ...part.operations,
+        { id: opId(), machine: "mill-3ax", setupMin: 5, cycleMin: 1 },
+      ],
+    });
+  }
+
+  const totalMin = part.operations.reduce((a, op) => a + opMinutes(op, qty), 0);
+  const totalCost = partMachineCost(part, qty / (part.perAssembly || 1));
+
+  return (
+    <div className="ops-table" style={{ marginTop: 6 }}>
+      <div className="row head">
+        <span></span>
+        <span>Operation · machine</span>
+        <span className="num">Setup</span>
+        <span className="num">Cycle</span>
+        <span className="num">Cost</span>
+        <span></span>
+      </div>
+      {part.operations.length === 0 && (
+        <div className="row" style={{ color: "var(--text-3)", padding: "10px 12px" }}>
+          <span></span>
+          <span style={{ gridColumn: "2 / -1" }}>No operations yet — add one to start estimating.</span>
+        </div>
+      )}
+      {part.operations.map((op, i) => (
+        <div className="row" key={op.id}>
+          <span className="idx-wrap">
+            <span className="reorder">
+              <button onClick={() => move(i, -1)} disabled={i === 0} title="Move up"><Icon name="chevron-up" size={9}/></button>
+              <button onClick={() => move(i, +1)} disabled={i === part.operations.length-1} title="Move down"><Icon name="chevron-down" size={9}/></button>
+            </span>
+            <span className="idx">{(i + 1) * 10}</span>
+          </span>
+          <div className="machine-cell">
+            <select value={op.machine} onChange={(e) => update(op.id, { machine: e.target.value })}>
+              {Object.entries(MACHINES).map(([k, v]) => (
+                <option key={k} value={k}>{v.label} · €{v.rate}/h</option>
+              ))}
+            </select>
+          </div>
+          <input type="number" className="mono" value={op.setupMin} min="0" step="0.5"
+                 onChange={(e) => update(op.id, { setupMin: +e.target.value || 0 })} />
+          <input type="number" className="mono" value={op.cycleMin} min="0" step="0.1"
+                 onChange={(e) => update(op.id, { cycleMin: +e.target.value || 0 })} />
+          <span className="num" style={{ paddingRight: 4 }}>{fmtEUR(opCost(op, qty))}</span>
+          <button className="remove-op" title="Remove" onClick={() => remove(op.id)}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ))}
+      <div className="ops-foot">
+        <button className="add-op-btn" onClick={add}>
+          <Icon name="plus" size={12}/> Add operation
+        </button>
+        <div className="summary">
+          <strong>{fmtMin(totalMin)} min</strong> · {fmtEUR(totalCost)} machining
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   DFM panel
+   ----------------------------------------------------------- */
+
+function DfmPanel({ parts, onSelectPart, asmQty }) {
+  // Combine the hand-authored DFM_ISSUES with dynamic rules derived from current state.
+  const dynamicIssues = [];
+  parts.forEach(p => {
+    if (!p.included || p.stocked || !p.stock) return;
+    const util = stockUtilization(p);
+    if (util != null && util < 0.25) {
+      const sm = stockMassKg(p.stock, p.material);
+      const wasteKg = Math.max(0, sm - p.mass);
+      const rate = MATERIALS[p.material]?.rate ?? 0;
+      const impact = wasteKg * rate * partQty(p, asmQty);
+      dynamicIssues.push({
+        id: `dfm-util-${p.id}`,
+        partId: p.id,
+        severity: util < 0.15 ? "error" : "warn",
+        title: `Low stock utilization · ${(util*100).toFixed(0)}%`,
+        desc: `Chip waste ${wasteKg.toFixed(3)} kg per part. Consider a smaller stock size or near-net shape (extrusion, casting, plate).`,
+        impact: Math.round(impact),
+        suggest: "Resize stock to net + 4 mm finishing allowance",
+        actionable: true,
+      });
+    }
+  });
+  const allIssues = [...dynamicIssues, ...DFM_ISSUES];
+  const totalImpact = allIssues.reduce((a, i) => a + (i.impact || 0), 0);
+  const counts = allIssues.reduce((a, i) => ({ ...a, [i.severity]: (a[i.severity] || 0) + 1 }), {});
+  const partName = (id) => parts.find(p => p.id === id)?.name || id;
+
+  return (
+    <div className="panel dfm-panel">
+      <div className="panel-head">
+        <span className="title">DFM review</span>
+        <span className="sub">{allIssues.length} flagged · est. cost impact {fmtEUR0(totalImpact)}</span>
+        <div className="right">
+          <span className="dfm-summary">
+            {counts.error ? <span className="chip danger" style={{height:22}}><span className="dot"></span>{counts.error} blocker</span> : null}
+            {counts.warn  ? <span className="chip warning" style={{height:22}}><span className="dot"></span>{counts.warn} caution</span> : null}
+            {counts.info  ? <span className="chip accent" style={{height:22}}><span className="dot"></span>{counts.info} info</span> : null}
+          </span>
+          <button className="btn sm ghost"><Icon name="settings-2" size={12}/> Rules</button>
+        </div>
+      </div>
+
+      {allIssues.length === 0 ? (
+        <div className="dfm-empty">
+          <div className="ic-wrap"><Icon name="shield-check" size={18}/></div>
+          <div>No design issues flagged. Geometry is within manufacturing limits.</div>
+        </div>
+      ) : (
+        <div className="dfm-list">
+          {allIssues.map(i => {
+            const sevIcon = i.severity === "error" ? "octagon-x" : i.severity === "warn" ? "alert-triangle" : "info";
+            return (
+              <div className="dfm-row" key={i.id}>
+                <div className={`dfm-sev ${i.severity}`}><Icon name={sevIcon} size={14} strokeWidth={2}/></div>
+                <div className="dfm-body">
+                  <div className="dfm-title">
+                    <span>{i.title}</span>
+                    <button className="partref" onClick={() => onSelectPart(i.partId)} title="Show part">{partName(i.partId)}</button>
+                  </div>
+                  <div className="dfm-desc">{i.desc}</div>
+                  <div className="dfm-suggest"><Icon name="lightbulb" size={11}/> {i.suggest}</div>
+                </div>
+                <div className="dfm-impact">
+                  <span className="label">Cost impact</span>
+                  +{fmtEUR0(i.impact)}
+                </div>
+                <div className="dfm-actions">
+                  {i.actionable && <button className="btn sm">Apply fix</button>}
+                  <button className="btn sm ghost">Accept</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   RFQ rail (sticky)
+   ----------------------------------------------------------- */
+
+function Field({ label, value, unit, type = "text", onChange, grid }) {
+  return (
+    <div className="field" style={grid ? { gridColumn: grid } : null}>
+      <label>{label}</label>
+      <div className={unit ? "suffix" : ""}>
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange && onChange(type === "number" ? +e.target.value || 0 : e.target.value)}
+          className={type === "number" ? "num" : ""}
+          style={unit ? { paddingRight: 38 } : null}
+        />
+        {unit && <span className="unit">{unit}</span>}
+      </div>
+    </div>
+  );
+}
+
+function LeadTimeBar({ lead }) {
+  const segs = [
+    { k: "Queue",     v: lead.queue,   c: "#b9c1c9" },
+    { k: "Machining", v: lead.machine, c: "#5d80c9" },
+    { k: "Finishing", v: lead.finish,  c: "#c9b48f" },
+    { k: "Ship",      v: lead.ship,    c: "#9fb6a4" },
+  ];
+  const total = lead.total;
+  return (
+    <div className="leadtime">
+      <div className="lt-head">
+        <div className="ship-by">
+          <Icon name="truck" size={13}/> Ship by {fmtShipDate(lead.shipDate)}
+        </div>
+        <div className="days">{lead.total} working days</div>
+      </div>
+      <div className="lt-bar">
+        {segs.map(s => (
+          <span key={s.k} style={{ width: `${(s.v / total) * 100}%`, background: s.c }}></span>
+        ))}
+      </div>
+      <div className="lt-stages">
+        {segs.map(s => (
+          <div className="lt-stage" key={s.k}>
+            <span className="swatch" style={{ background: s.c }}></span>
+            <span className="label">{s.k}</span>
+            <span className="val">{s.v}d</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const QTY_BREAKS = [1, 10, 25, 100, 250];
+
+function QuantityBreaks({ parts, asmQty, setAsmQty, commercial }) {
+  const currentTotal = rollup(parts, asmQty, commercial).total;
+  const currentUnit = asmQty > 0 ? currentTotal / asmQty : 0;
+
+  const breaks = QTY_BREAKS.map(q => {
+    const r = rollup(parts, q, commercial);
+    return { q, total: r.total, unit: q > 0 ? r.total / q : 0 };
+  });
+  const baseUnit = breaks[0].unit;
+  const bestSavings = currentUnit > 0 ? ((baseUnit - currentUnit) / baseUnit) * 100 : 0;
+
+  return (
+    <div className="qty-breaks">
+      <div className="head">
+        <span className="eyebrow">Quantity breaks</span>
+        {bestSavings > 0 && (
+          <span className="savings">{fmtPct(-bestSavings)} vs qty 1</span>
+        )}
+      </div>
+      <div className="qty-breaks-grid">
+        {breaks.map(b => {
+          const active = b.q === asmQty;
+          const delta = baseUnit > 0 ? ((b.unit - baseUnit) / baseUnit) * 100 : 0;
+          return (
+            <div
+              key={b.q}
+              className={`qty-break ${active ? "active" : ""}`}
+              onClick={() => setAsmQty(b.q)}
+              title={`${b.q} assemblies — total ${fmtEUR(b.total)}`}
+            >
+              <div className="qty-val">{b.q}×</div>
+              <div className="qty-unit">{fmtEUR0(b.unit)}</div>
+              {b.q > 1 && <div className="qty-delta">{fmtPct(delta)}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, customer, project, setCommercial, commercial }) {
+  const [tab, setTab] = useState_q("inputs");
+  const selected = parts.find(p => p.id === selectedId) || null;
+
+  function updateSelected(patch) {
+    if (!selected) return;
+    setParts(parts.map(p => p.id === selected.id ? { ...p, ...patch } : p));
+  }
+
+  const r = rollup(parts, asmQty, commercial);
+  const totalQty = parts.filter(p => p.included).reduce((a, p) => a + partQty(p, asmQty), 0);
+  const lead = computeLeadTime(parts, asmQty);
+  const unit = asmQty > 0 ? r.total / asmQty : 0;
+
+  return (
+    <div className="panel rfq-panel">
+      <div className="panel-head">
+        <span className="title">RFQ-2026-014</span>
+        <div className="right">
+          <span className="chip"><Icon name="user" size={11}/> {customer}</span>
+        </div>
+      </div>
+
+      <div className="tabstrip">
+        <button className={tab==="inputs"?"on":""} onClick={()=>setTab("inputs")}>
+          <span className="ic"><Icon name="sliders-horizontal" size={13}/></span> Inputs
+        </button>
+        <button className={tab==="history"?"on":""} onClick={()=>setTab("history")}>
+          <span className="ic"><Icon name="history" size={13}/></span> History
+        </button>
+        <button className={tab==="notes"?"on":""} onClick={()=>setTab("notes")}>
+          <span className="ic"><Icon name="message-square" size={13}/></span> Notes
+        </button>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {tab === "inputs" && (
+          <>
+            {selected ? (
+              <div className="selected-bar" style={{ marginTop: 10 }}>
+                <span className="swatch" style={{ background: selected.color }}></span>
+                <span className="lbl">Editing</span>
+                <span className="pname">{selected.name}</span>
+                <span className="meta">#{selected.id}</span>
+              </div>
+            ) : (
+              <div className="selected-bar" style={{ marginTop: 10, background: "var(--panel-2)", borderColor: "var(--border)", color: "var(--text-3)" }}>
+                <Icon name="mouse-pointer-2" size={12} />
+                <span>Click a body in the preview or table to edit its inputs</span>
+              </div>
+            )}
+
+            <div className="rfq-fields">
+              <Field label="Customer" value={customer} grid="1 / -1" />
+              <Field label="Project"  value={project} />
+              <Field label="RFQ ref"  value="RFQ-2026-014" />
+
+              {selected && (
+                <>
+                  <div className="full" style={{ marginTop: 4 }}>
+                    <div className="eyebrow">Material · {selected.name}</div>
+                  </div>
+                  <div className="field" style={{ gridColumn: "1 / -1" }}>
+                    <label>Stock</label>
+                    <select value={selected.material} onChange={(e) => updateSelected({ material: e.target.value })}>
+                      {Object.entries(MATERIALS).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+                    </select>
+                  </div>
+                  <Field label="Rate / kg" value={(MATERIALS[selected.material]?.rate ?? 0).toFixed(2)} type="number" unit="€" />
+                  <Field
+                    label="Per assembly"
+                    value={selected.perAssembly}
+                    type="number"
+                    onChange={(v) => updateSelected({ perAssembly: v })}
+                  />
+                </>
+              )}
+            </div>
+
+            {selected && !selected.stocked && (
+              <MaterialCard materialId={selected.material} />
+            )}
+
+            {selected && !selected.stocked && (
+              <StockEditor part={selected} onChange={updateSelected} />
+            )}
+
+            {selected && !selected.stocked && (
+              <>
+                <div className="sub-head">
+                  <span className="eyebrow">Machining operations</span>
+                  <span className="muted" style={{ marginLeft: "auto", fontSize: 10.5, fontFamily: "var(--font-mono)" }}>
+                    qty × {partQty(selected, asmQty)}
+                  </span>
+                </div>
+                <OperationsEditor part={selected} qty={partQty(selected, asmQty)} onChange={updateSelected} />
+              </>
+            )}
+
+            {selected && selected.stocked && (
+              <div style={{ margin: "8px 14px", padding: 10, background: "var(--panel-2)", border: "1px dashed var(--border)", borderRadius: 6, fontSize: 12, color: "var(--text-3)" }}>
+                <Icon name="package" size={12} style={{ verticalAlign: -2, marginRight: 6 }}/>
+                Purchased part — no in-house machining. Material rate captures unit cost.
+              </div>
+            )}
+
+            {selected && !selected.stocked && (
+              <div className="rfq-fields" style={{ paddingTop: 8 }}>
+                <div className="full"><div className="eyebrow">Finishing</div></div>
+                <Field
+                  label="Finishing / unit" value={selected.finishing.toFixed(2)} type="number" unit="€"
+                  onChange={(v) => updateSelected({ finishing: v })}
+                />
+              </div>
+            )}
+
+            <div className="rfq-fields" style={{ paddingTop: 8 }}>
+              <div className="full"><div className="eyebrow">Commercial · whole quote</div></div>
+              <Field label="Margin" value={commercial.marginPct} type="number" unit="%"
+                     onChange={(v) => setCommercial({ ...commercial, marginPct: v })} />
+              <Field label="Tax" value={commercial.taxPct} type="number" unit="%"
+                     onChange={(v) => setCommercial({ ...commercial, taxPct: v })} />
+            </div>
+
+            {/* Assembly qty, qty breaks, and lead time scroll WITH the inputs
+                so the Total panel below stays visible at the rail's bottom on
+                short viewports. */}
+            <div className="asm-qty-row" style={{ marginTop: 10 }}>
+              <span className="lbl">Assembly qty</span>
+              <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>
+                {totalQty} parts total
+              </span>
+              <input
+                type="number" min="1" value={asmQty}
+                onChange={(e) => setAsmQty(Math.max(1, +e.target.value || 1))}
+              />
+            </div>
+
+            <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} />
+
+            <LeadTimeBar lead={lead} />
+
+            <div style={{ height: 10 }}></div>
+          </>
+        )}
+
+        {tab === "history" && (
+          <div className="recents">
+            {[
+              { name: "Pump Manifold v3 · current draft", num: "Q-026-014 · rev C", amt: fmtEUR(r.total), date: "Now" },
+              { name: "Pump Manifold v3 · rev B", num: "Q-026-014 · rev B", amt: "€ 4,640.00", date: "May 12" },
+              { name: "Pump Manifold v2", num: "Q-025-204", amt: "€ 4,210.00", date: "Apr 28" },
+              { name: "Pump Manifold v1", num: "Q-025-110", amt: "€ 3,980.00", date: "Mar 18" },
+            ].map((r2, i) => (
+              <div className="recent" key={r2.num} style={i === 0 ? { background: "var(--accent-soft)" } : null}>
+                <div className="name">{r2.name}</div>
+                <div className="amt">{r2.amt}</div>
+                <div className="meta">{r2.num}</div>
+                <div className="date">{r2.date}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "notes" && (
+          <div style={{ padding: 14 }}>
+            <textarea
+              rows={10}
+              defaultValue={"• Confirm finish: bead-blast or anodized clear.\n• 6 mm thread depth in cap — verify drawing rev C.\n• Lead-time 12 working days from PO."}
+              style={{
+                width: "100%", padding: 10, resize: "none",
+                background: "var(--panel-2)", border: "1px solid var(--border)",
+                borderRadius: 6, fontFamily: "var(--font-sans)", fontSize: 12.5,
+                color: "var(--text-1)", outline: 0,
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Persistent bottom: assembly qty + qty breaks + lead time + total */}
+      <div className="asm-qty-row" style={{ marginTop: 10 }}>
+        <span className="lbl">Assembly qty</span>
+        <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>
+          {totalQty} parts total
+        </span>
+        <input
+          type="number" min="1" value={asmQty}
+          onChange={(e) => setAsmQty(Math.max(1, +e.target.value || 1))}
+        />
+      </div>
+
+      <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} />
+
+      <LeadTimeBar lead={lead} />
+
+      <div className="total-panel big" style={{ marginTop: 12 }}>
+        <div className="total-row">
+          <span className="label">Quotation total</span>
+          <span className="chip success"><span className="dot"></span>Within target</span>
+        </div>
+        <div className="duo">
+          <div className="cell">
+            <div className="label">Total</div>
+            <div className="value">{fmtEUR(r.total)}</div>
+            <div className="sub">{asmQty} assemblies</div>
+          </div>
+          <div className="cell right">
+            <div className="label">Per unit</div>
+            <div className="value">{fmtEUR(unit)}</div>
+            <div className="sub">incl. {commercial.marginPct}% margin</div>
+          </div>
+        </div>
+        <div className="total-actions">
+          <button className="btn block primary"><Icon name="file-down" size={14}/> Export PDF</button>
+          <button className="btn block"><Icon name="save" size={14}/> Save</button>
+          <button className="btn" title="Send"><Icon name="send" size={14}/></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
+   Quote workspace
+   ----------------------------------------------------------- */
+
+function QuoteWorkspace({ searchQuery = "" }) {
+  const [parts, setParts] = useState_q(PARTS);
+  const [selectedId, setSelectedId] = useState_q("body-cap");
+  const [asmQty, setAsmQty] = useState_q(25);
+  const [commercial, setCommercial] = useState_q({ marginPct: 18, taxPct: 0 });
+  const customer = "Acme Manufacturing";
+  const project  = "Pump Manifold v3";
+
+  const r = rollup(parts, asmQty, commercial);
+  const lead = computeLeadTime(parts, asmQty);
+
+  // breakdown by category across included parts
+  const cat = { material: 0, machine: 0, setup: 0, finish: 0 };
+  parts.forEach(p => {
+    if (!p.included) return;
+    const qty = partQty(p, asmQty);
+    cat.material += partMaterialCost(p, asmQty);
+    cat.finish   += partFinishCost(p, asmQty);
+    (p.operations || []).forEach(op => {
+      const rate = MACHINES[op.machine]?.rate ?? 0;
+      cat.setup   += (op.setupMin / 60) * rate;
+      cat.machine += (op.cycleMin / 60) * rate * qty;
+    });
+  });
+
+  // machine utilization
+  const machineBreakdown = {};
+  parts.forEach(p => {
+    if (!p.included) return;
+    const qty = partQty(p, asmQty);
+    (p.operations || []).forEach(op => {
+      const rate = MACHINES[op.machine]?.rate ?? 0;
+      const cost = (op.setupMin / 60) * rate + (op.cycleMin / 60) * rate * qty;
+      const mins = op.setupMin + op.cycleMin * qty;
+      machineBreakdown[op.machine] = machineBreakdown[op.machine] || { cost: 0, mins: 0 };
+      machineBreakdown[op.machine].cost += cost;
+      machineBreakdown[op.machine].mins += mins;
+    });
+  });
+  const machineRows = Object.entries(machineBreakdown).sort((a, b) => b[1].cost - a[1].cost);
+
+  const segs = [
+    { k: "Material",   v: cat.material, c: "#5d80c9" },
+    { k: "Machining",  v: cat.machine,  c: "#7b95c0" },
+    { k: "Setup",      v: cat.setup,    c: "#9aabc7" },
+    { k: "Finishing",  v: cat.finish,   c: "#c9b48f" },
+    { k: "Tooling",    v: r.tooling,    c: "#c7c2b4" },
+    { k: "Inspection", v: r.inspection, c: "#9fb6a4" },
+    { k: "Margin",     v: r.margin,     c: "#5fa05f" },
+  ];
+  const segsTotal = segs.reduce((a, s) => a + s.v, 0) || 1;
+
+  const totalMachineMin = parts
+    .filter(p => p.included)
+    .reduce((a, p) => a + (p.operations || []).reduce((b, op) => b + opMinutes(op, partQty(p, asmQty)), 0), 0);
+
+  return (
+    <div className="quote-grid">
+      <div className="panel preview-panel">
+        <div className="panel-head">
+          <span className="title">Part preview</span>
+          <span className="sub">Pump Manifold v3.step · 128.4 × 86.2 × 42.6 mm</span>
+          <div className="right">
+            {DFM_ISSUES.length > 0 ? (
+              <span className="chip warning"><span className="dot"></span>{DFM_ISSUES.length} DFM issues</span>
+            ) : null}
+            <button className="btn sm ghost"><Icon name="external-link" size={12}/> Open in viewer</button>
+          </div>
+        </div>
+        <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId} />
+        <div className="metric-strip">
+          <div>
+            <div className="label"><Icon name="boxes" size={12}/> Bodies</div>
+            <div className="value">{parts.filter(p => p.included).length}<span className="muted" style={{fontSize:11}}> / {parts.length}</span></div>
+          </div>
+          <div>
+            <div className="label"><Icon name="scale" size={12}/> Total mass</div>
+            <div className="value">{parts.filter(p => p.included).reduce((a,p)=>a+p.mass*partQty(p,asmQty),0).toFixed(2)} <span className="muted" style={{fontSize:11}}>kg</span></div>
+          </div>
+          <div>
+            <div className="label"><Icon name="clock" size={12}/> Machine time</div>
+            <div className="value">{fmtMin(totalMachineMin)} <span className="muted" style={{fontSize:11}}>min</span></div>
+          </div>
+          <div>
+            <div className="label"><Icon name="truck" size={12}/> Ship</div>
+            <div className="value" style={{ fontSize: 13 }}>{fmtShipDate(lead.shipDate)}</div>
+          </div>
+        </div>
+      </div>
+
+      <RfqRail
+        parts={parts} setParts={setParts}
+        asmQty={asmQty} setAsmQty={setAsmQty}
+        selectedId={selectedId}
+        customer={customer} project={project}
+        commercial={commercial} setCommercial={setCommercial}
+      />
+
+      <PartsTable
+        parts={parts} setParts={setParts}
+        asmQty={asmQty}
+        selectedId={selectedId} onSelect={setSelectedId}
+        searchQuery={searchQuery}
+      />
+
+      <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty} />
+
+      <div className="panel cost-panel">
+        <div className="panel-head">
+          <span className="title">Cost breakdown</span>
+          <span className="sub">Subtotal {fmtEUR(r.subtotal)} · Margin {fmtEUR(r.margin)} · Tax {fmtEUR(r.tax)}</span>
+          <div className="right">
+            <button className="btn sm ghost"><Icon name="copy" size={12}/> Duplicate</button>
+            <button className="btn sm ghost"><Icon name="settings-2" size={12}/> Rate card</button>
+          </div>
+        </div>
+
+        <div className="margin-bar">
+          {segs.map(s => (
+            <span key={s.k} style={{ width: `${(s.v / segsTotal) * 100}%`, background: s.c }}></span>
+          ))}
+        </div>
+        <div className="margin-legend">
+          {segs.map(s => (
+            <span key={s.k}>
+              <span className="dot" style={{ background: s.c }}></span>
+              {s.k}<span className="v">{fmtEUR(s.v)}</span>
+            </span>
+          ))}
+        </div>
+
+        <div className="cost-grid">
+          <div className="cost-row left"><span className="k">Parts subtotal · {parts.filter(p => p.included).length} bodies</span><span className="v">{fmtEUR(r.partsCost)}</span></div>
+          <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtEUR(r.tooling)}</span></div>
+          <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtEUR(r.inspection)}</span></div>
+          <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtEUR(r.margin)}</span></div>
+          <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtEUR(r.subtotal)}</span></div>
+          <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtEUR(r.total)}</span></div>
+        </div>
+
+        {machineRows.length > 0 && (
+          <>
+            <div style={{ padding: "10px 14px 4px", borderTop: "1px solid var(--divider)" }}>
+              <div className="eyebrow">Machine utilization</div>
+            </div>
+            <div style={{ padding: "0 14px 16px" }}>
+              {machineRows.map(([m, info]) => {
+                const pct = r.partsCost > 0 ? (info.cost / r.partsCost) * 100 : 0;
+                return (
+                  <div key={m} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px 80px", alignItems: "center", gap: 10, padding: "6px 0", fontSize: 12 }}>
+                    <span style={{ color: "var(--text-2)" }}>{MACHINES[m]?.label || m}</span>
+                    <div style={{ height: 6, background: "var(--panel-3)", borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: "var(--accent)" }}></div>
+                    </div>
+                    <span className="mono muted" style={{ textAlign: "right", fontSize: 11 }}>{fmtMin(info.mins)} min</span>
+                    <span className="mono" style={{ textAlign: "right", fontSize: 12 }}>{fmtEUR(info.cost)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+window.QuoteWorkspace = QuoteWorkspace;

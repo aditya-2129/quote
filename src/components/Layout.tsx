@@ -1,26 +1,17 @@
-import type { ReactNode } from "react";
+import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { useSidebarCollapsed } from "../hooks/useSidebarCollapsed";
 
-interface LayoutProps {
-  children: ReactNode;
-}
+export function Layout() {
+  const [collapsed, toggle] = useSidebarCollapsed();
 
-export function Layout({ children }: LayoutProps) {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--color-bg-primary)]">
-      {/* Sidebar */}
-      <Sidebar />
-
-      {/* Main Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <Header />
-
-        {/* Content */}
-        <main className="flex-1 overflow-auto p-6">
-          <div className="animate-fade-in">{children}</div>
-        </main>
+    <div className="app" data-sidebar={collapsed ? "collapsed" : "expanded"}>
+      <Header />
+      <Sidebar collapsed={collapsed} onToggle={toggle} />
+      <div className="main">
+        <Outlet />
       </div>
     </div>
   );

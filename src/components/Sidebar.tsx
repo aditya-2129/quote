@@ -1,232 +1,79 @@
 import {
   LayoutDashboard,
+  Inbox,
   FileText,
   Package,
-  Settings,
   Users,
   BarChart3,
-  FolderOpen,
-  HelpCircle,
+  Gem,
+  Settings2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { NavLink } from "react-router-dom";
 
-interface NavItem {
-  id: string;
-  label: string;
-  icon: ReactNode;
-  badge?: number;
+const PRIMARY_NAV = [
+  { id: "dashboard", to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "rfqs",      to: "/rfqs",      label: "RFQs",      icon: Inbox,      badge: 8 },
+  { id: "quotes",    to: "/quotes",    label: "Quotes",    icon: FileText,   badge: 12 },
+  { id: "parts",     to: "/parts",     label: "Parts",     icon: Package },
+  { id: "customers", to: "/customers", label: "Customers", icon: Users },
+  { id: "analytics", to: "/analytics", label: "Analytics", icon: BarChart3 },
+];
+
+const SECONDARY_NAV = [
+  { id: "library",  to: "/materials", label: "Material library",  icon: Gem },
+  { id: "machines", to: "/machines",  label: "Machines & rates",  icon: Settings2 },
+];
+
+interface SidebarProps {
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-const navItems: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
-  {
-    id: "projects",
-    label: "Projects",
-    icon: <FolderOpen size={18} />,
-    badge: 3,
-  },
-  { id: "quotes", label: "Quotes", icon: <FileText size={18} />, badge: 12 },
-  { id: "parts", label: "Parts Library", icon: <Package size={18} /> },
-  { id: "customers", label: "Customers", icon: <Users size={18} /> },
-  { id: "analytics", label: "Analytics", icon: <BarChart3 size={18} /> },
-];
-
-const bottomNavItems: NavItem[] = [
-  { id: "settings", label: "Settings", icon: <Settings size={18} /> },
-  { id: "help", label: "Help & Support", icon: <HelpCircle size={18} /> },
-];
-
-export function Sidebar() {
-  const [activeItem, setActiveItem] = useState("dashboard");
-
+export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   return (
-    <aside
-      className="flex flex-col border-r bg-[var(--color-bg-secondary)]"
-      style={{
-        width: "var(--spacing-sidebar)",
-        minWidth: "var(--spacing-sidebar)",
-        borderColor: "var(--color-border-secondary)",
-      }}
-    >
-      {/* Logo Area */}
-      <div
-        className="flex items-center gap-3 border-b px-5"
-        style={{
-          height: "var(--spacing-header)",
-          borderColor: "var(--color-border-secondary)",
-        }}
+    <aside className="sidebar">
+      <button
+        className="sb-collapsor"
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        onClick={onToggle}
       >
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg font-bold text-white"
-          style={{
-            background:
-              "linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary))",
-            boxShadow: "var(--shadow-glow)",
-          }}
-        >
-          Q
-        </div>
-        <div>
-          <h1
-            className="text-sm font-semibold tracking-wide"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            QUOTE
-          </h1>
-          <p
-            className="text-[10px] tracking-widest uppercase"
-            style={{ color: "var(--color-text-tertiary)" }}
-          >
-            Industrial Suite
-          </p>
-        </div>
+        {collapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+      </button>
+
+      <div className="sb-section">
+        <div className="sb-section-label">Workspace</div>
+        <nav className="sb-nav">
+          {PRIMARY_NAV.map((it) => {
+            const Icon = it.icon;
+            return (
+              <NavLink key={it.id} className={({ isActive }) => `sb-item ${isActive ? "active" : ""}`} to={it.to} title={collapsed ? it.label : undefined}>
+                <span className="ic"><Icon size={15} /></span>
+                <span className="label">{it.label}</span>
+                {it.badge !== undefined && <span className="badge">{it.badge}</span>}
+              </NavLink>
+            );
+          })}
+        </nav>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <div className="space-y-1">
-          {navItems.map((item, index) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveItem(item.id)}
-              className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200"
-              style={{
-                color:
-                  activeItem === item.id
-                    ? "var(--color-text-primary)"
-                    : "var(--color-text-secondary)",
-                backgroundColor:
-                  activeItem === item.id
-                    ? "var(--color-bg-active)"
-                    : "transparent",
-                animationDelay: `${index * 50}ms`,
-              }}
-              onMouseEnter={(e) => {
-                if (activeItem !== item.id) {
-                  e.currentTarget.style.backgroundColor =
-                    "var(--color-bg-hover)";
-                  e.currentTarget.style.color = "var(--color-text-primary)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (activeItem !== item.id) {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                  e.currentTarget.style.color = "var(--color-text-secondary)";
-                }
-              }}
-            >
-              <span
-                className="transition-colors duration-200"
-                style={{
-                  color:
-                    activeItem === item.id
-                      ? "var(--color-accent-primary-hover)"
-                      : "inherit",
-                }}
-              >
-                {item.icon}
-              </span>
-              <span className="font-medium">{item.label}</span>
-              {item.badge !== undefined && (
-                <span
-                  className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  style={{
-                    backgroundColor:
-                      activeItem === item.id
-                        ? "var(--color-accent-primary)"
-                        : "var(--color-bg-surface)",
-                    color:
-                      activeItem === item.id
-                        ? "white"
-                        : "var(--color-text-secondary)",
-                  }}
-                >
-                  {item.badge}
-                </span>
-              )}
-              {activeItem === item.id && (
-                <div
-                  className="absolute left-0 h-6 w-[3px] rounded-r-full"
-                  style={{
-                    backgroundColor: "var(--color-accent-primary)",
-                  }}
-                />
-              )}
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Bottom Navigation */}
-      <div
-        className="border-t px-3 py-3"
-        style={{ borderColor: "var(--color-border-secondary)" }}
-      >
-        {bottomNavItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveItem(item.id)}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200"
-            style={{
-              color:
-                activeItem === item.id
-                  ? "var(--color-text-primary)"
-                  : "var(--color-text-tertiary)",
-              backgroundColor:
-                activeItem === item.id
-                  ? "var(--color-bg-active)"
-                  : "transparent",
-            }}
-            onMouseEnter={(e) => {
-              if (activeItem !== item.id) {
-                e.currentTarget.style.backgroundColor = "var(--color-bg-hover)";
-                e.currentTarget.style.color = "var(--color-text-secondary)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeItem !== item.id) {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "var(--color-text-tertiary)";
-              }
-            }}
-          >
-            {item.icon}
-            <span>{item.label}</span>
-          </button>
-        ))}
+      <div className="sb-section">
+        <div className="sb-section-label">Configure</div>
+        <nav className="sb-nav">
+          {SECONDARY_NAV.map((it) => {
+            const Icon = it.icon;
+            return (
+              <NavLink key={it.id} className={({ isActive }) => `sb-item ${isActive ? "active" : ""}`} to={it.to} title={collapsed ? it.label : undefined}>
+                <span className="ic"><Icon size={15} /></span>
+                <span className="label">{it.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
       </div>
 
-      {/* User Section */}
-      <div
-        className="border-t px-4 py-3"
-        style={{ borderColor: "var(--color-border-secondary)" }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--color-accent-secondary), var(--color-accent-primary))",
-            }}
-          >
-            AD
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <p
-              className="truncate text-sm font-medium"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              Admin User
-            </p>
-            <p
-              className="truncate text-[11px]"
-              style={{ color: "var(--color-text-tertiary)" }}
-            >
-              admin@quote.app
-            </p>
-          </div>
-        </div>
-      </div>
+      <div className="sb-spacer" />
     </aside>
   );
 }
