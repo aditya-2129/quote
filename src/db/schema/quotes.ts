@@ -36,7 +36,7 @@ export const quotes = sqliteTable(
       .$type<number[]>()
       .notNull()
       .default([1, 10, 25, 100, 250]),
-    currency: text("currency").notNull().default("EUR"),
+    currency: text("currency").notNull().default("INR"),
     toolingCost: real("tooling_cost").notNull().default(0),
     inspectionCost: real("inspection_cost").notNull().default(0),
     marginPercent: real("margin_percent").notNull().default(0),

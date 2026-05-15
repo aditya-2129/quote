@@ -25,7 +25,9 @@ export async function createMaterial(
   const now = new Date();
   const id = crypto.randomUUID();
   await db.insert(materials).values({ ...data, id, createdAt: now, updatedAt: now }).run();
-  return (await getMaterialById(id))!;
+  const result = await getMaterialById(id);
+  if (!result) throw new Error("Failed to retrieve material after insertion");
+  return result;
 }
 
 export async function updateMaterial(

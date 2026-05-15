@@ -1,4 +1,6 @@
-export { Dashboard } from "./Dashboard";
+export { ViewerPage } from "./ViewerPage";
+export { QuoteDetailPage } from "./QuoteDetailPage";
+export { QuoteViewerPage } from "./QuoteViewerPage";
 export { RfqsPage } from "./RfqsPage";
 export { QuotesPage } from "./QuotesPage";
 export { PartsPage } from "./PartsPage";

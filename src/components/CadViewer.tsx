@@ -11,7 +11,62 @@ export type CadViewerHandle = {
   fit: (meshId?: string) => void;
   setOrientation: (orientation: CadViewOrientation) => void;
   screenshot: () => string | null;
+  clearMeasure: () => void;
+  getModelSize: () => number;
 };
+
+// ── Measure helpers ──────────────────────────────────────────────────────────
+
+function nearestVertex(
+  geo: THREE.BufferGeometry,
+  worldMat: THREE.Matrix4,
+  target: THREE.Vector3,
+  threshold: number,
+): THREE.Vector3 | null {
+  const pos = geo.attributes.position;
+  if (!pos) return null;
+  const v = new THREE.Vector3();
+  let best: THREE.Vector3 | null = null;
+  let bestDist = threshold;
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(worldMat);
+    const d = v.distanceTo(target);
+    if (d < bestDist) { bestDist = d; best = v.clone(); }
+    if (bestDist < threshold * 0.1) break; // close enough, stop early
+  }
+  return best;
+}
+
+function nearestEdgePoint(
+  edgesGeo: THREE.BufferGeometry,
+  worldMat: THREE.Matrix4,
+  target: THREE.Vector3,
+  threshold: number,
+): THREE.Vector3 | null {
+  const pos = edgesGeo.attributes.position;
+  if (!pos) return null;
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  let best: THREE.Vector3 | null = null;
+  let bestDist = threshold;
+  for (let i = 0; i + 1 < pos.count; i += 2) {
+    a.fromBufferAttribute(pos, i).applyMatrix4(worldMat);
+    b.fromBufferAttribute(pos, i + 1).applyMatrix4(worldMat);
+    const ab = b.clone().sub(a);
+    const lenSq = ab.dot(ab);
+    const t = lenSq > 0.0001 ? Math.max(0, Math.min(1, target.clone().sub(a).dot(ab) / lenSq)) : 0;
+    const pt = a.clone().add(ab.multiplyScalar(t));
+    const d = pt.distanceTo(target);
+    if (d < bestDist) { bestDist = d; best = pt.clone(); }
+  }
+  return best;
+}
+
+function axisConstrain(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3 {
+  const dx = Math.abs(b.x - a.x), dy = Math.abs(b.y - a.y), dz = Math.abs(b.z - a.z);
+  if (dx >= dy && dx >= dz) return new THREE.Vector3(b.x, a.y, a.z);
+  if (dy >= dx && dy >= dz) return new THREE.Vector3(a.x, b.y, a.z);
+  return new THREE.Vector3(a.x, a.y, b.z);
+}
 
 type CadViewerProps = {
   model: CadImportResult;
@@ -22,7 +77,10 @@ type CadViewerProps = {
   explode: { x: number; y: number; z: number };
   showEdges?: boolean;
   bgColor?: string;
+  clippingPlane?: { axis: 'x' | 'y' | 'z'; value: number } | null;
+  measureMode?: boolean;
   onSelectMesh?: (meshId: string | undefined) => void;
+  onMeasured?: (distanceMm: number) => void;
   ref?: Ref<CadViewerHandle>;
 };
 
@@ -45,17 +103,42 @@ export function CadViewer({
   explode,
   showEdges = true,
   bgColor,
+  clippingPlane,
+  measureMode,
   onSelectMesh,
+  onMeasured,
   ref,
 }: CadViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
   const recordsRef = useRef<SceneMeshRecord[]>([]);
   const modelSizeRef = useRef(1);
+  const modelScaleRef = useRef(1);
   const selectedMeshIdRef = useRef(selectedMeshId);
+  const measureModeRef = useRef(measureMode ?? false);
+  const onMeasuredRef = useRef(onMeasured);
+  const onSelectMeshRef = useRef(onSelectMesh);
+  const measurePointsRef = useRef<THREE.Vector3[]>([]);
+  const measureObjectsRef = useRef<THREE.Object3D[]>([]);
+  const measurePointARef = useRef<THREE.Vector3 | null>(null);
+  const shiftPressedRef = useRef(false);
+  const previewLineRef = useRef<THREE.Line | null>(null);
+  const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
+  const currentSnapRef = useRef<THREE.Vector3 | null>(null);
   useEffect(() => { selectedMeshIdRef.current = selectedMeshId; }, [selectedMeshId]);
+  useEffect(() => {
+    measureModeRef.current = measureMode ?? false;
+    if (!measureMode) {
+      if (snapIndicatorRef.current) snapIndicatorRef.current.visible = false;
+      if (previewLineRef.current) previewLineRef.current.visible = false;
+      measurePointARef.current = null;
+    }
+  }, [measureMode]);
+  useEffect(() => { onMeasuredRef.current = onMeasured; }, [onMeasured]);
+  useEffect(() => { onSelectMeshRef.current = onSelectMesh; }, [onSelectMesh]);
 
   const setCameraOrientation = (orientation: CadViewOrientation) => {
     const camera = cameraRef.current;
@@ -121,11 +204,17 @@ export function CadViewer({
 
   useImperativeHandle(ref, () => ({
     fit: (meshId?: string) => fitCamera(meshId),
-    setOrientation: (orientation: CadViewOrientation) => {
-      setCameraOrientation(orientation);
+    setOrientation: (orientation: CadViewOrientation) => setCameraOrientation(orientation),
+    screenshot: () => rendererRef.current?.domElement.toDataURL("image/png") ?? null,
+    getModelSize: () => modelSizeRef.current,
+    clearMeasure: () => {
+      measurePointsRef.current = [];
+      measurePointARef.current = null;
+      measureObjectsRef.current.forEach(o => sceneRef.current?.remove(o));
+      measureObjectsRef.current = [];
+      if (previewLineRef.current) previewLineRef.current.visible = false;
+      if (snapIndicatorRef.current) snapIndicatorRef.current.visible = false;
     },
-    screenshot: () =>
-      rendererRef.current?.domElement.toDataURL("image/png") ?? null,
   }));
 
   useEffect(() => {
@@ -135,6 +224,7 @@ export function CadViewer({
     }
 
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50000);
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -155,6 +245,11 @@ export function CadViewer({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
+    controls.mouseButtons = {
+      LEFT: undefined as unknown as THREE.MOUSE,
+      MIDDLE: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.PAN,
+    };
     controlsRef.current = controls;
 
     scene.add(new THREE.HemisphereLight("#ffffff", "#6b7280", 2.7));
@@ -199,6 +294,7 @@ export function CadViewer({
     const maxSize = Math.max(size.x, size.y, size.z, 1);
     const scale = 420 / maxSize;
     modelSizeRef.current = Math.max(size.x, size.y, size.z) * scale;
+    modelScaleRef.current = scale;
 
     const rawChildren = [...rawGroup.children];
     rawChildren.forEach((object, index) => {
@@ -326,22 +422,139 @@ export function CadViewer({
 
     walkAssembly(rootInfo, new THREE.Vector3());
 
+    // Measure overlay objects
+    const previewLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const previewLine = new THREE.Line(
+      previewLineGeo,
+      new THREE.LineBasicMaterial({ color: "#f59e0b", depthTest: false, transparent: true, opacity: 0.6 }),
+    );
+    previewLine.renderOrder = 997;
+    previewLine.visible = false;
+    scene.add(previewLine);
+    previewLineRef.current = previewLine;
+
+    const snapIndicator = new THREE.Mesh(
+      new THREE.SphereGeometry(3.5, 12, 12),
+      new THREE.MeshBasicMaterial({ color: "#22c55e", depthTest: false }),
+    );
+    snapIndicator.renderOrder = 1000;
+    snapIndicator.visible = false;
+    scene.add(snapIndicator);
+    snapIndicatorRef.current = snapIndicator;
+
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+
+    const getSnappedPoint = (event: { clientX: number; clientY: number }): THREE.Vector3 | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const meshes = recordsRef.current.map(r => r.mesh);
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length === 0) return null;
+      const hitPoint = hits[0].point.clone();
+      const hitObject = hits[0].object as THREE.Mesh;
+      const threshold = modelSizeRef.current * 0.04;
+      const rec = recordsRef.current.find(r => r.mesh === hitObject);
+      const vSnap = nearestVertex(hitObject.geometry, hitObject.matrixWorld, hitPoint, threshold);
+      const eSnap = rec ? nearestEdgePoint(rec.edges.geometry, rec.edges.matrixWorld, hitPoint, threshold) : null;
+      if (vSnap && eSnap) return vSnap.distanceTo(hitPoint) <= eSnap.distanceTo(hitPoint) ? vSnap : eSnap;
+      return vSnap ?? eSnap ?? hitPoint;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!measureModeRef.current) return;
+      const snapped = getSnappedPoint(event);
+      if (!snapped) {
+        snapIndicator.visible = false;
+        previewLine.visible = false;
+        currentSnapRef.current = null;
+        return;
+      }
+      currentSnapRef.current = snapped;
+      snapIndicator.position.copy(snapped);
+      snapIndicator.visible = true;
+      const ptA = measurePointARef.current;
+      if (ptA) {
+        const ptB = shiftPressedRef.current ? axisConstrain(ptA, snapped) : snapped;
+        const positions = previewLine.geometry.attributes.position as THREE.BufferAttribute;
+        positions.setXYZ(0, ptA.x, ptA.y, ptA.z);
+        positions.setXYZ(1, ptB.x, ptB.y, ptB.z);
+        positions.needsUpdate = true;
+        previewLine.geometry.computeBoundingSphere();
+        previewLine.visible = true;
+      }
+    };
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === "Shift") shiftPressedRef.current = true; };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === "Shift") shiftPressedRef.current = false; };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
     const handlePointerDown = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(
-        recordsRef.current.map((record) => record.mesh),
-        false,
-      );
+      const meshes = recordsRef.current.map(r => r.mesh);
+      const hits = raycaster.intersectObjects(meshes, false);
+
+      if (measureModeRef.current) {
+        const pt = currentSnapRef.current?.clone() ?? (hits.length > 0 ? hits[0].point.clone() : null);
+        if (!pt) {
+          // Clicked empty space — cancel in-progress measurement
+          if (measurePointARef.current !== null) {
+            measurePointARef.current = null;
+            measureObjectsRef.current.forEach(o => scene.remove(o));
+            measureObjectsRef.current = [];
+            previewLine.visible = false;
+          }
+          return;
+        }
+
+        const makeDot = (pos: THREE.Vector3) => {
+          const dot = new THREE.Mesh(
+            new THREE.SphereGeometry(2.5, 10, 10),
+            new THREE.MeshBasicMaterial({ color: "#f59e0b", depthTest: false }),
+          );
+          dot.renderOrder = 999;
+          dot.position.copy(pos);
+          scene.add(dot);
+          measureObjectsRef.current.push(dot);
+        };
+
+        if (measurePointARef.current === null) {
+          // Clear any previous measurement before starting a new one
+          measureObjectsRef.current.forEach(o => scene.remove(o));
+          measureObjectsRef.current = [];
+          measurePointARef.current = pt;
+          makeDot(pt);
+        } else {
+          const ptB = shiftPressedRef.current ? axisConstrain(measurePointARef.current, pt) : pt;
+          makeDot(ptB);
+          const lineGeo = new THREE.BufferGeometry().setFromPoints([measurePointARef.current, ptB]);
+          const line = new THREE.Line(
+            lineGeo,
+            new THREE.LineBasicMaterial({ color: "#f59e0b", depthTest: false }),
+          );
+          line.renderOrder = 998;
+          scene.add(line);
+          measureObjectsRef.current.push(line);
+          const distMm = measurePointARef.current.distanceTo(ptB) / modelScaleRef.current;
+          onMeasuredRef.current?.(distMm);
+          measurePointARef.current = null;
+          previewLine.visible = false;
+        }
+        return;
+      }
+
       const meshId = hits[0]?.object.userData.meshId as string | undefined;
       if (!meshId || meshId === selectedMeshIdRef.current) {
-        onSelectMesh?.(undefined);
+        onSelectMeshRef.current?.(undefined);
       } else {
-        onSelectMesh?.(meshId);
+        onSelectMeshRef.current?.(meshId);
       }
     };
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
@@ -371,9 +584,16 @@ export function CadViewer({
     return () => {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
       controls.dispose();
       renderer.dispose();
+      previewLine.geometry.dispose();
+      snapIndicator.geometry.dispose();
+      previewLineRef.current = null;
+      snapIndicatorRef.current = null;
       recordsRef.current.forEach((record) => {
         record.mesh.geometry.dispose();
         record.edges.geometry.dispose();
@@ -381,12 +601,17 @@ export function CadViewer({
         record.edgeMaterial.dispose();
       });
       recordsRef.current = [];
+      measureObjectsRef.current = [];
+      measurePointsRef.current = [];
+      measurePointARef.current = null;
+      currentSnapRef.current = null;
       container.removeChild(renderer.domElement);
       rendererRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      sceneRef.current = null;
     };
-  }, [model, onSelectMesh]);
+  }, [model]);
 
   useEffect(() => {
     const sceneColor = bgColor ?? (viewportTheme === "light" ? "#f8fafc" : "#0b0f14");
@@ -416,6 +641,21 @@ export function CadViewer({
       record.edges.position.copy(record.mesh.position);
     });
   }, [bgColor, displayMode, explode, hiddenMeshIds, selectedMeshId, showEdges, viewportTheme]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    if (!clippingPlane) {
+      renderer.clippingPlanes = [];
+      return;
+    }
+    const normals: Record<'x'|'y'|'z', THREE.Vector3> = {
+      x: new THREE.Vector3(1, 0, 0),
+      y: new THREE.Vector3(0, 1, 0),
+      z: new THREE.Vector3(0, 0, 1),
+    };
+    renderer.clippingPlanes = [new THREE.Plane(normals[clippingPlane.axis], -clippingPlane.value)];
+  }, [clippingPlane]);
 
   return (
     <div

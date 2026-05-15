@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard,
+  Box,
   Inbox,
   FileText,
   Package,
@@ -13,7 +13,7 @@ import {
 import { NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
-  { id: "dashboard", to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "viewer", to: "/viewer", label: "Viewer", icon: Box },
   { id: "rfqs",      to: "/rfqs",      label: "RFQs",      icon: Inbox,      badge: 8 },
   { id: "quotes",    to: "/quotes",    label: "Quotes",    icon: FileText,   badge: 12 },
   { id: "parts",     to: "/parts",     label: "Parts",     icon: Package },

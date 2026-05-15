@@ -8,11 +8,11 @@ export async function seed(): Promise<void> {
 
   // ── Materials ────────────────────────────────────────────────────────────
   await db.insert(materials).values([
-    { id: "mat-al6061",    name: "Aluminum 6061-T6",   densityKgPerM3: 2700, costPerKg: 5.5, currency: "USD", markupPercent: 15, machinability: 4, colorHex: "#bfc7d1", category: "Metal",     availableForms: ["plate","bar","extrusion"], isActive: true, isSystem: true, createdAt: now, updatedAt: now },
-    { id: "mat-steel1018", name: "Steel 1018",         densityKgPerM3: 7870, costPerKg: 2.1, currency: "USD", markupPercent: 12, machinability: 3, colorHex: "#8d959c", category: "Metal",     availableForms: ["plate","bar"],             isActive: true, isSystem: true, createdAt: now, updatedAt: now },
-    { id: "mat-ss304",     name: "Stainless Steel 304",densityKgPerM3: 8000, costPerKg: 6.8, currency: "USD", markupPercent: 18, machinability: 2, colorHex: "#a8b0b8", category: "Metal",     availableForms: ["plate","bar","tube"],      isActive: true, isSystem: true, createdAt: now, updatedAt: now },
-    { id: "mat-brass",     name: "Brass CW614N",       densityKgPerM3: 8500, costPerKg: 8.4, currency: "USD", markupPercent: 20, machinability: 5, colorHex: "#c69f5a", category: "Metal",     availableForms: ["bar","tube"],              isActive: true, isSystem: true, createdAt: now, updatedAt: now },
-    { id: "mat-stock",     name: "Stock / Purchased",  densityKgPerM3: 1000, costPerKg: 0,   currency: "USD", markupPercent: 0,  machinability: 0, colorHex: "#dcd9d2", category: "Purchased", availableForms: [],                          isActive: true, isSystem: true, createdAt: now, updatedAt: now },
+    { id: "mat-ms",        name: "Mild Steel (MS)",    densityKgPerM3: 7850, costPerKg: 75,  currency: "INR", markupPercent: 15, category: "Metal",     availableForms: ["rect","round","hex"],     formRates: { rect: 75, round: 80, hex: 85 },   isActive: true, isSystem: true, createdAt: now, updatedAt: now },
+    { id: "mat-al6061",    name: "Aluminum 6061-T6",   densityKgPerM3: 2700, costPerKg: 280, currency: "INR", markupPercent: 15, category: "Metal",     availableForms: ["rect","round"],           formRates: { rect: 280, round: 290 },         isActive: true, isSystem: true, createdAt: now, updatedAt: now },
+    { id: "mat-ss304",     name: "Stainless Steel 304",densityKgPerM3: 8000, costPerKg: 320, currency: "INR", markupPercent: 18, category: "Metal",     availableForms: ["rect","round","hex"],     formRates: { rect: 320, round: 330, hex: 350 }, isActive: true, isSystem: true, createdAt: now, updatedAt: now },
+    { id: "mat-brass",     name: "Brass CW614N",       densityKgPerM3: 8500, costPerKg: 650, currency: "INR", markupPercent: 20, category: "Metal",     availableForms: ["round","hex"],            formRates: { round: 650, hex: 680 },           isActive: true, isSystem: true, createdAt: now, updatedAt: now },
+    { id: "mat-stock",     name: "Stock / Purchased",  densityKgPerM3: 1000, costPerKg: 0,   currency: "INR", markupPercent: 0,  category: "Purchased", availableForms: ["rect"],                   formRates: { rect: 0 },                        isActive: true, isSystem: true, createdAt: now, updatedAt: now },
   ]).run();
 
   // ── Machines ─────────────────────────────────────────────────────────────

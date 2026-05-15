@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { FileText, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus } from "lucide-react";
 import { getRootQuotes } from "../db/queries";
 import type { Quote } from "../db/schema";
 import { EmptyState } from "../components/EmptyState";
@@ -7,6 +8,7 @@ import { EmptyState } from "../components/EmptyState";
 export function QuotesPage() {
   const [rows, setRows] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     getRootQuotes().then(r => { setRows(r); setLoading(false); });
@@ -23,9 +25,7 @@ export function QuotesPage() {
       </div>
       <div className="panel">
         <div className="panel-head"><div className="title">All Quotes</div></div>
-        {loading ? <EmptyState text="Loading…" />
-          : rows.length === 0 ? <EmptyState text="No quotes yet." icon={<FileText size={24}/>} />
-          : (
+        {loading ? <EmptyState text="Loading…" /> : (
             <table className="data-table">
               <thead>
                 <tr>
@@ -38,6 +38,14 @@ export function QuotesPage() {
                 </tr>
               </thead>
               <tbody>
+                <tr style={{ cursor: "pointer" }} onClick={() => navigate("/quotes/demo")}>
+                  <td>RFQ-2026-014</td>
+                  <td>C</td>
+                  <td>Pump Manifold v3</td>
+                  <td><span className="status-pill" style={{ background: "var(--panel-3)", color: "var(--text-2)" }}>draft</span></td>
+                  <td>25</td>
+                  <td>₹51,919.73</td>
+                </tr>
                 {rows.map(r => {
                   let badgeClass = "var(--panel-3)";
                   let badgeText = "var(--text-2)";
@@ -64,7 +72,7 @@ export function QuotesPage() {
                   }
 
                   return (
-                    <tr key={r.id}>
+                    <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/quotes/${r.id}`)}>
                       <td>{r.quoteNumber}</td>
                       <td>{r.revision}</td>
                       <td>{r.title}</td>

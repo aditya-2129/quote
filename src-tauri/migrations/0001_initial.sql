@@ -20,18 +20,19 @@ CREATE TABLE IF NOT EXISTS materials (
   name                TEXT    NOT NULL,
   density_kg_per_m3   REAL    NOT NULL DEFAULT 0,
   cost_per_kg         REAL    NOT NULL DEFAULT 0,
-  currency            TEXT    NOT NULL DEFAULT 'USD',
+  currency            TEXT    NOT NULL DEFAULT 'INR',
   markup_percent      REAL    NOT NULL DEFAULT 0,
-  machinability       INTEGER NOT NULL DEFAULT 3,   -- 1 (hard) – 5 (easy)
-  color_hex           TEXT    NOT NULL DEFAULT '#888888',
   category            TEXT,                          -- "Metal", "Plastic", "Purchased"
-  available_forms     TEXT    NOT NULL DEFAULT '[]', -- JSON: ["plate","bar","tube"]
+  available_forms     TEXT    NOT NULL DEFAULT '[]', -- JSON: ["rect","round","hex"]
+  form_rates          TEXT    NOT NULL DEFAULT '{}', -- JSON: {"rect":75, "round":80}
   notes               TEXT,
-  is_active           INTEGER NOT NULL DEFAULT 1,
-  is_system           INTEGER NOT NULL DEFAULT 0,
-  created_at          INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at          INTEGER NOT NULL DEFAULT (unixepoch())
+
+  is_active           BOOLEAN NOT NULL DEFAULT 1,
+  is_system           BOOLEAN NOT NULL DEFAULT 0,
+  created_at          DATETIME NOT NULL,
+  updated_at          DATETIME NOT NULL
 );
+
 
 -- Machine / process library
 CREATE TABLE IF NOT EXISTS machines (
@@ -84,7 +85,7 @@ CREATE TABLE IF NOT EXISTS quotes (
   assembly_quantity INTEGER NOT NULL DEFAULT 1,
   -- JSON array of qty breakpoints, e.g. [1,10,25,100,250]
   quantity_breaks   TEXT    NOT NULL DEFAULT '[1,10,25,100,250]',
-  currency          TEXT    NOT NULL DEFAULT 'EUR',
+  currency          TEXT    NOT NULL DEFAULT 'INR',
   tooling_cost      REAL    NOT NULL DEFAULT 0,
   inspection_cost   REAL    NOT NULL DEFAULT 0,
   margin_percent    REAL    NOT NULL DEFAULT 0,

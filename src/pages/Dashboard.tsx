@@ -13,7 +13,6 @@ import {
   ChevronUp,
   Clock,
   Cog,
-  Command,
   Copy,
   ExternalLink,
   FileCheck2,
@@ -62,24 +61,24 @@ import type { CadImportResult, CadMesh } from "@utils/index";
    Reference data — materials, machines, parts
    =========================================================== */
 
-const MATERIALS: Record<string, { label: string; rate: number; density: number; machinability: number; hex: string; grade: string; forms: string[] }> = {
-  "al-6061":    { label: "Aluminum 6061-T6", rate: 5.50, density: 2700, machinability: 4, hex: "#bfc7d1", grade: "T6 temper · UNS A96061",   forms: ["plate", "bar", "extrusion"] },
-  "steel-1018": { label: "Steel 1018",       rate: 2.10, density: 7870, machinability: 3, hex: "#8d959c", grade: "Low-carbon · cold-rolled",   forms: ["plate", "bar"] },
-  "brass":      { label: "Brass CW614N",     rate: 8.40, density: 8500, machinability: 5, hex: "#c69f5a", grade: "Free-machining · leaded",     forms: ["bar", "tube"] },
-  "ss-304":     { label: "Stainless 304",    rate: 6.80, density: 8000, machinability: 2, hex: "#a8b0b8", grade: "Austenitic · corrosion-grade", forms: ["plate", "bar", "tube"] },
-  "stock":      { label: "Stock / purchased", rate: 0,   density: 1000, machinability: 0, hex: "#dcd9d2", grade: "Purchased · not machined",   forms: ["—"] },
+const MATERIALS: Record<string, { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number> }> = {
+  "mat-ms":     { label: "Mild Steel (MS)",  density: 7850, hex: "#8d959c", grade: "IS 2062 · Structural steel",   forms: ["rect", "round", "hex"], rates: { rect: 75, round: 80, hex: 85 } },
+  "al-6061":    { label: "Aluminum 6061-T6", density: 2700, hex: "#bfc7d1", grade: "T6 temper · IS 737",         forms: ["rect", "round"],        rates: { rect: 280, round: 290 } },
+  "brass":      { label: "Brass CW614N",     density: 8500, hex: "#c69f5a", grade: "Free-machining · IS 319",     forms: ["round", "hex"],         rates: { round: 650, hex: 680 } },
+  "ss-304":     { label: "Stainless 304",    density: 8000, hex: "#a8b0b8", grade: "Austenitic · SS 304 Grade",    forms: ["rect", "round", "hex"], rates: { rect: 320, round: 330, hex: 350 } },
+  "stock":      { label: "Stock / purchased", density: 1000, hex: "#dcd9d2", grade: "Purchased · not machined",   forms: ["rect"],                 rates: { rect: 0 } },
 };
 
 const MACHINES: Record<string, { label: string; rate: number; short: string }> = {
-  "mill-3ax": { label: "Mill · 3-axis",    rate: 68,  short: "Mill 3-ax" },
-  "mill-5ax": { label: "Mill · 5-axis",    rate: 110, short: "Mill 5-ax" },
-  "lathe":    { label: "Lathe",            rate: 58,  short: "Lathe" },
-  "drill":    { label: "Drill press",      rate: 38,  short: "Drill" },
-  "tap":      { label: "Tap / thread",     rate: 38,  short: "Tap" },
-  "wire-edm": { label: "Wire EDM",         rate: 95,  short: "Wire EDM" },
-  "grind":    { label: "Surface grind",    rate: 72,  short: "Grind" },
-  "deburr":   { label: "Deburr / hand",    rate: 28,  short: "Deburr" },
-  "inspect":  { label: "CMM inspect",      rate: 64,  short: "CMM" },
+  "mill-3ax": { label: "Mill · 3-axis",    rate: 1500, short: "Mill 3-ax" },
+  "mill-5ax": { label: "Mill · 5-axis",    rate: 3500, short: "Mill 5-ax" },
+  "lathe":    { label: "Lathe",            rate: 1200, short: "Lathe" },
+  "drill":    { label: "Drill press",      rate: 800,  short: "Drill" },
+  "tap":      { label: "Tap / thread",     rate: 800,  short: "Tap" },
+  "wire-edm": { label: "Wire EDM",         rate: 2200, short: "Wire EDM" },
+  "grind":    { label: "Surface grind",    rate: 1600, short: "Grind" },
+  "deburr":   { label: "Deburr / hand",    rate: 600,  short: "Deburr" },
+  "inspect":  { label: "CMM inspect",      rate: 1400, short: "CMM" },
 };
 
 const SHAPES: Record<string, { label: string; dims: string[] }> = {
@@ -124,7 +123,7 @@ const INITIAL_PARTS: Part[] = [
   },
   {
     id: "body-cap",  name: "Body · cap",         color: "#2f4f7d",
-    material: "steel-1018", perAssembly: 1, mass: 0.124, finishing: 1.60, included: true,
+    material: "mat-ms", perAssembly: 1, mass: 0.124, finishing: 1.60, included: true,
     stock: { shape: "block", dims: { L: 85, W: 50, H: 28 } },
     operations: [
       { id: opId(), machine: "mill-3ax", setupMin: 12, cycleMin: 4.0 },
@@ -172,6 +171,15 @@ function stockVolumeMm3(stock: Stock): number {
   }
 }
 
+const SHAPE_TO_FORM: Record<string, string> = { block: "rect", cylinder: "round", "hex-bar": "hex", tube: "round" };
+function getMaterialRate(materialId: string, stockShape?: string): number {
+  const mat = MATERIALS[materialId];
+  if (!mat) return 0;
+  const form = stockShape ? SHAPE_TO_FORM[stockShape] : undefined;
+  if (form && mat.rates[form] !== undefined) return mat.rates[form];
+  return Object.values(mat.rates)[0] ?? 0;
+}
+
 function stockMassKg(stock: Stock | null, materialId: string): number {
   if (!stock) return 0;
   return stockVolumeMm3(stock) * 1e-9 * (MATERIALS[materialId]?.density ?? 0);
@@ -196,7 +204,7 @@ function partMachineCost(p: Part, asmQty: number): number {
   return (p.operations || []).reduce((a, op) => a + opCost(op, qty), 0);
 }
 function partMaterialCost(p: Part, asmQty: number): number {
-  const matRate = MATERIALS[p.material]?.rate ?? 0;
+  const matRate = getMaterialRate(p.material, p.stock?.shape);
   const mass = (p.stocked || !p.stock) ? p.mass : stockMassKg(p.stock, p.material);
   return mass * matRate * partQty(p, asmQty);
 }
@@ -215,9 +223,9 @@ function rollup(parts: Part[], asmQty: number, commercial: { marginPct: number; 
   return { partsCost, tooling: TOOLING_BATCH, inspection: INSPECTION_BATCH, subtotal, margin, tax, total };
 }
 
-function fmtEUR(n: number) { return "€ " + n.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtEUR0(n: number) { return "€ " + n.toLocaleString("en", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
-function fmtMin(n: number) { return n.toLocaleString("en", { minimumFractionDigits: 0, maximumFractionDigits: 1 }); }
+function fmtINR(n: number) { return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtINR0(n: number) { return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function fmtMin(n: number) { return n.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 1 }); }
 function fmtPct(n: number) { return (n >= 0 ? "+" : "") + n.toFixed(1) + "%"; }
 
 function addBusinessDays(start: Date, n: number): Date {
@@ -262,45 +270,6 @@ function ShapeIcon({ shape, size = 14 }: { shape: string; size?: number }) {
 /* ===========================================================
    Keyboard shortcuts overlay
    =========================================================== */
-
-function KbdOverlay({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const groups = [
-    { name: "Navigation", items: [{ keys: ["V"], label: "Switch to Viewer" }, { keys: ["Q"], label: "Switch to Quote" }, { keys: ["/"], label: "Focus search" }, { keys: ["?"], label: "Toggle cheatsheet" }, { keys: ["Esc"], label: "Close overlays" }] },
-    { name: "Quote actions", items: [{ keys: ["S"], label: "Save quote" }, { keys: ["E"], label: "Export PDF" }, { keys: ["A"], label: "Add operation" }, { keys: ["D"], label: "Duplicate part" }] },
-    { name: "Viewer", items: [{ keys: ["F"], label: "Fit to view" }, { keys: ["1"], label: "Isometric" }, { keys: ["2"], label: "Front" }, { keys: ["W"], label: "Toggle wireframe" }] },
-    { name: "Parts", items: [{ keys: ["↑"], label: "Select previous part" }, { keys: ["↓"], label: "Select next part" }, { keys: ["Space"], label: "Toggle include" }] },
-  ];
-
-  return (
-    <div className="kbd-overlay" onClick={onClose}>
-      <div className="kbd-card" onClick={e => e.stopPropagation()}>
-        <div className="head">
-          <span className="title">Keyboard shortcuts</span>
-          <button className="close" onClick={onClose}><X size={15} /></button>
-        </div>
-        <div className="kbd-body">
-          {groups.map(g => (
-            <div className="kbd-group" key={g.name}>
-              <h5>{g.name}</h5>
-              {g.items.map((it, i) => (
-                <div className="kbd-row" key={i}>
-                  <span>{it.label}</span>
-                  <span className="kbd-keys">{it.keys.map((k, j) => <span className="kbd-key" key={j}>{k}</span>)}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ===========================================================
    Viewer workspace
@@ -643,18 +612,18 @@ function OperationsEditor({ part, qty, onChange }: { part: Part; qty: number; on
           </span>
           <div className="machine-cell">
             <select value={op.machine} onChange={e => update(op.id,{machine:e.target.value})}>
-              {Object.entries(MACHINES).map(([k,v]) => <option key={k} value={k}>{v.label} · €{v.rate}/h</option>)}
+              {Object.entries(MACHINES).map(([k,v]) => <option key={k} value={k}>{v.label} · ₹{v.rate}/h</option>)}
             </select>
           </div>
           <input type="number" className="mono" value={op.setupMin} min="0" step="0.5" onChange={e => update(op.id,{setupMin:+e.target.value||0})} />
           <input type="number" className="mono" value={op.cycleMin} min="0" step="0.1" onChange={e => update(op.id,{cycleMin:+e.target.value||0})} />
-          <span className="num" style={{ paddingRight: 4 }}>{fmtEUR(opCost(op,qty))}</span>
+          <span className="num" style={{ paddingRight: 4 }}>{fmtINR(opCost(op,qty))}</span>
           <button className="remove-op" onClick={() => remove(op.id)}><X size={12}/></button>
         </div>
       ))}
       <div className="ops-foot">
         <button className="add-op-btn" onClick={add}><Plus size={12}/> Add operation</button>
-        <div className="summary"><strong>{fmtMin(totalMin)} min</strong> · {fmtEUR(totalCost)} machining</div>
+        <div className="summary"><strong>{fmtMin(totalMin)} min</strong> · {fmtINR(totalCost)} machining</div>
       </div>
     </div>
   );
@@ -732,12 +701,18 @@ function MaterialCard({ materialId }: { materialId: string }) {
         <div className="grade">{m.grade}</div>
         <div className="specs">
           <div><span className="k">Density</span><span className="v">{m.density.toLocaleString()} kg/m³</span></div>
-          <div><span className="k">Rate</span><span className="v">€ {m.rate.toFixed(2)}/kg</span></div>
-          <div><span className="k">Stock forms</span><span className="v" style={{ fontSize: 10.5 }}>{m.forms.join(", ")}</span></div>
+          <div style={{ gridColumn: "span 2", marginTop: 4 }}>
+            <span className="k" style={{ marginBottom: 4 }}>Rates per form (₹/kg)</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {Object.entries(m.rates).map(([f, r]) => (
+                <div key={f} className="status-pill" style={{ fontSize: 10, padding: "2px 6px" }}>
+                  <span style={{ color: "var(--text-3)", marginRight: 4, textTransform: "capitalize" }}>{f}:</span>
+                  {r.toFixed(0)}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <span className="machinability">Machinability
-          <span className="bars">{[1,2,3,4,5].map(i => <span key={i} className={i<=m.machinability?"fill":""} />)}</span>
-        </span>
       </div>
     </div>
   );
@@ -838,12 +813,12 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
                 <td className="num" onClick={e=>e.stopPropagation()}><input type="number" className="qty-input" value={p.perAssembly} onChange={e=>update(p.id,{perAssembly:+e.target.value||0})}/></td>
                 <td className="num muted">{qty}</td>
                 <td>{ops.length===0?<span className="muted" style={{ fontSize:11 }}>—</span>:<div style={{ display:"flex",alignItems:"center",gap:6,flexWrap:"wrap" }}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{ fontSize:10.5,fontFamily:"var(--font-mono)" }}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
-                <td className="num">{p.included?fmtEUR(sub):"—"}</td>
+                <td className="num">{p.included?fmtINR(sub):"—"}</td>
                 <td onClick={e=>e.stopPropagation()}><button className="more-btn"><MoreHorizontal size={14}/></button></td>
               </tr>
             );
           })}
-          <tr className="totals"><td colSpan={6} style={{ color:"var(--text-3)" }}>Filtered subtotal · {filtered.length} of {parts.length} parts</td><td className="num">{fmtEUR(totalAmount)}</td><td/></tr>
+          <tr className="totals"><td colSpan={6} style={{ color:"var(--text-3)" }}>Filtered subtotal · {filtered.length} of {parts.length} parts</td><td className="num">{fmtINR(totalAmount)}</td><td/></tr>
         </tbody>
       </table>
     </div>
@@ -860,7 +835,7 @@ function DfmPanel({ parts, onSelectPart, asmQty }: { parts: Part[]; onSelectPart
     if (!p.included || p.stocked || !p.stock) return;
     const util = stockUtilization(p);
     if (util != null && util < 0.25) {
-      const sm = stockMassKg(p.stock, p.material), waste = Math.max(0, sm-p.mass), rate = MATERIALS[p.material]?.rate??0, impact = Math.round(waste*rate*partQty(p,asmQty));
+      const sm = stockMassKg(p.stock, p.material), waste = Math.max(0, sm-p.mass), rate = getMaterialRate(p.material, p.stock?.shape), impact = Math.round(waste*rate*partQty(p,asmQty));
       dynamicIssues.push({ id: `dfm-util-${p.id}`, partId: p.id, severity: util<0.15?"error":"warn", title: `Low stock utilization · ${(util*100).toFixed(0)}%`, desc: `Chip waste ${waste.toFixed(3)} kg per part. Consider smaller stock or near-net shape.`, impact, suggest: "Resize stock to net + 4 mm finishing allowance", actionable: true });
     }
   });
@@ -873,7 +848,7 @@ function DfmPanel({ parts, onSelectPart, asmQty }: { parts: Part[]; onSelectPart
     <div className="panel dfm-panel">
       <div className="panel-head">
         <span className="title">DFM review</span>
-        <span className="sub">{allIssues.length} flagged · est. cost impact {fmtEUR0(totalImpact)}</span>
+        <span className="sub">{allIssues.length} flagged · est. cost impact {fmtINR0(totalImpact)}</span>
         <div className="right">
           <span className="dfm-summary">
             {counts.error>0&&<span className="chip danger" style={{ height:22 }}><span className="dot"/>{counts.error} blocker</span>}
@@ -897,7 +872,7 @@ function DfmPanel({ parts, onSelectPart, asmQty }: { parts: Part[]; onSelectPart
                   <div className="dfm-desc">{i.desc}</div>
                   <div className="dfm-suggest"><Lightbulb size={11}/> {i.suggest}</div>
                 </div>
-                <div className="dfm-impact"><span className="label">Cost impact</span>+{fmtEUR0(i.impact)}</div>
+                <div className="dfm-impact"><span className="label">Cost impact</span>+{fmtINR0(i.impact)}</div>
                 <div className="dfm-actions">{i.actionable&&<button className="btn sm">Apply fix</button>}<button className="btn sm ghost">Accept</button></div>
               </div>
             );
@@ -949,7 +924,7 @@ function QuantityBreaks({ parts, asmQty, setAsmQty, commercial }: { parts: Part[
           return (
             <div key={b.q} className={`qty-break ${b.q===asmQty?"active":""}`} onClick={() => setAsmQty(b.q)}>
               <div className="qty-val">{b.q}×</div>
-              <div className="qty-unit">{fmtEUR0(b.unit)}</div>
+              <div className="qty-unit">{fmtINR0(b.unit)}</div>
               {b.q>1&&<div className="qty-delta">{fmtPct(delta)}</div>}
             </div>
           );
@@ -1031,7 +1006,7 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
                       {Object.entries(MATERIALS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                     </select>
                   </div>
-                  <Field label="Rate / kg" value={(MATERIALS[selected.material]?.rate??0).toFixed(2)} type="number" unit="€"/>
+                  <Field label="Rate / kg" value={getMaterialRate(selected.material, selected.stock?.shape).toFixed(2)} type="number" unit="₹"/>
                   <Field label="Per assembly" value={selected.perAssembly} type="number" onChange={v=>updateSelected({perAssembly:v as number})}/>
                 </>
               )}
@@ -1053,7 +1028,7 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
             {selected&&!selected.stocked&&(
               <div className="rfq-fields" style={{ paddingTop:8 }}>
                 <div className="full"><div className="eyebrow">Finishing</div></div>
-                <Field label="Finishing / unit" value={selected.finishing.toFixed(2)} type="number" unit="€" onChange={v=>updateSelected({finishing:v as number})}/>
+                <Field label="Finishing / unit" value={selected.finishing.toFixed(2)} type="number" unit="₹" onChange={v=>updateSelected({finishing:v as number})}/>
               </div>
             )}
             <div className="rfq-fields" style={{ paddingTop:8 }}>
@@ -1074,9 +1049,9 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
         {tab==="history"&&(
           <div className="recents">
             {[
-              { name:"Pump Manifold v3 · current draft", num:"Q-026-014 · rev C", amt:fmtEUR(r.total), date:"Now" },
-              { name:"Pump Manifold v3 · rev B", num:"Q-026-014 · rev B", amt:"€ 4,640.00", date:"May 12" },
-              { name:"Pump Manifold v2", num:"Q-025-204", amt:"€ 4,210.00", date:"Apr 28" },
+              { name:"Pump Manifold v3 · current draft", num:"Q-026-014 · rev C", amt:fmtINR(r.total), date:"Now" },
+              { name:"Pump Manifold v3 · rev B", num:"Q-026-014 · rev B", amt:"₹4,64,000.00", date:"May 12" },
+              { name:"Pump Manifold v2", num:"Q-025-204", amt:"₹4,21,000.00", date:"Apr 28" },
             ].map((r2,i) => (
               <div key={r2.num} className="recent" style={i===0?{background:"var(--accent-soft)"}:undefined}>
                 <div className="name">{r2.name}</div><div className="amt">{r2.amt}</div>
@@ -1106,8 +1081,8 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
           <span className="chip success"><span className="dot"/>Within target</span>
         </div>
         <div className="duo">
-          <div className="cell"><div className="label">Total</div><div className="value">{fmtEUR(r.total)}</div><div className="sub">{asmQty} assemblies</div></div>
-          <div className="cell right"><div className="label">Per unit</div><div className="value">{fmtEUR(unit)}</div><div className="sub">incl. {commercial.marginPct}% margin</div></div>
+          <div className="cell"><div className="label">Total</div><div className="value">{fmtINR(r.total)}</div><div className="sub">{asmQty} assemblies</div></div>
+          <div className="cell right"><div className="label">Per unit</div><div className="value">{fmtINR(unit)}</div><div className="sub">incl. {commercial.marginPct}% margin</div></div>
         </div>
         <div className="total-actions">
           <button className="btn block primary"><FileDown size={14}/> Export PDF</button>
@@ -1196,21 +1171,21 @@ function QuoteWorkspace({ searchQuery }: { searchQuery: string }) {
       <div className="panel cost-panel">
         <div className="panel-head">
           <span className="title">Cost breakdown</span>
-          <span className="sub">Subtotal {fmtEUR(r.subtotal)} · Margin {fmtEUR(r.margin)}</span>
+          <span className="sub">Subtotal {fmtINR(r.subtotal)} · Margin {fmtINR(r.margin)}</span>
           <div className="right">
             <button className="btn sm ghost"><Copy size={12}/> Duplicate</button>
             <button className="btn sm ghost"><Settings2 size={12}/> Rate card</button>
           </div>
         </div>
         <div className="margin-bar">{segs.map(s=><span key={s.k} style={{ width:`${(s.v/segsTotal)*100}%`,background:s.c }}/>)}</div>
-        <div className="margin-legend">{segs.map(s=><span key={s.k}><span className="dot" style={{ background:s.c }}/>{s.k}<span className="v">{fmtEUR(s.v)}</span></span>)}</div>
+        <div className="margin-legend">{segs.map(s=><span key={s.k}><span className="dot" style={{ background:s.c }}/>{s.k}<span className="v">{fmtINR(s.v)}</span></span>)}</div>
         <div className="cost-grid">
-          <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtEUR(r.partsCost)}</span></div>
-          <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtEUR(r.tooling)}</span></div>
-          <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtEUR(r.inspection)}</span></div>
-          <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtEUR(r.margin)}</span></div>
-          <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtEUR(r.subtotal)}</span></div>
-          <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtEUR(r.total)}</span></div>
+          <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtINR(r.partsCost)}</span></div>
+          <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
+          <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
+          <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
+          <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtINR(r.subtotal)}</span></div>
+          <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtINR(r.total)}</span></div>
         </div>
         {machineRows.length>0&&(
           <>
@@ -1223,7 +1198,7 @@ function QuoteWorkspace({ searchQuery }: { searchQuery: string }) {
                     <span style={{ color:"var(--text-2)" }}>{MACHINES[m]?.label||m}</span>
                     <div style={{ height:6,background:"var(--panel-3)",borderRadius:99,overflow:"hidden" }}><div style={{ width:`${Math.min(pct,100)}%`,height:"100%",background:"var(--accent)" }}/></div>
                     <span className="mono muted" style={{ textAlign:"right",fontSize:11 }}>{fmtMin(info.mins)} min</span>
-                    <span className="mono" style={{ textAlign:"right",fontSize:12 }}>{fmtEUR(info.cost)}</span>
+                    <span className="mono" style={{ textAlign:"right",fontSize:12 }}>{fmtINR(info.cost)}</span>
                   </div>
                 );
               })}
@@ -1249,7 +1224,6 @@ export function Dashboard() {
   const [workspace, setWorkspace] = useState<"viewer"|"quote">("quote");
   const quoteState = "draft";
   const searchQuery = "";
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cad, setCad] = useState<CadImportResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setStatus] = useState("Import a STEP file to get started");
@@ -1259,11 +1233,9 @@ export function Dashboard() {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       const inField = tag==="input"||tag==="textarea"||tag==="select"||(e.target as HTMLElement)?.isContentEditable;
       if (e.key==="/"&&!inField) { e.preventDefault(); window.__focusGlobalSearch?.(); return; }
-      if (e.key==="?"&&!inField) { e.preventDefault(); setShortcutsOpen(o=>!o); return; }
       if (inField) return;
       if (e.key.toLowerCase()==="v") setWorkspace("viewer");
       if (e.key.toLowerCase()==="q") setWorkspace("quote");
-      if (e.key==="Escape") setShortcutsOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -1306,7 +1278,6 @@ export function Dashboard() {
             </div>
           </div>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <button className="btn ghost sm" onClick={() => setShortcutsOpen(true)}><Command size={13}/> Shortcuts</button>
             <button className="btn sm"><Share2 size={13}/> Share</button>
             <div className="seg">
               <button className={workspace==="viewer"?"on":""} onClick={() => setWorkspace("viewer")}>
@@ -1324,7 +1295,6 @@ export function Dashboard() {
           : <QuoteWorkspace searchQuery={searchQuery}/>
         }
       </div>
-      {shortcutsOpen && <KbdOverlay onClose={() => setShortcutsOpen(false)}/>}
     </>
   );
 }
