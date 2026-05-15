@@ -1,7 +1,8 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { CadImportResult, CadTreeNode } from "@utils/index";
+import type { CadImportResult } from "@utils/index";
+import { analyzeShape, type ShapeAnalysis } from "@utils/shapeAnalysis";
 
 export type CadViewOrientation = "iso" | "front" | "top" | "right";
 export type CadDisplayMode = "solid" | "wireframe";
@@ -16,50 +17,6 @@ export type CadViewerHandle = {
 };
 
 // ── Measure helpers ──────────────────────────────────────────────────────────
-
-function nearestVertex(
-  geo: THREE.BufferGeometry,
-  worldMat: THREE.Matrix4,
-  target: THREE.Vector3,
-  threshold: number,
-): THREE.Vector3 | null {
-  const pos = geo.attributes.position;
-  if (!pos) return null;
-  const v = new THREE.Vector3();
-  let best: THREE.Vector3 | null = null;
-  let bestDist = threshold;
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i).applyMatrix4(worldMat);
-    const d = v.distanceTo(target);
-    if (d < bestDist) { bestDist = d; best = v.clone(); }
-    if (bestDist < threshold * 0.1) break; // close enough, stop early
-  }
-  return best;
-}
-
-function nearestEdgePoint(
-  edgesGeo: THREE.BufferGeometry,
-  worldMat: THREE.Matrix4,
-  target: THREE.Vector3,
-  threshold: number,
-): THREE.Vector3 | null {
-  const pos = edgesGeo.attributes.position;
-  if (!pos) return null;
-  const a = new THREE.Vector3(), b = new THREE.Vector3();
-  let best: THREE.Vector3 | null = null;
-  let bestDist = threshold;
-  for (let i = 0; i + 1 < pos.count; i += 2) {
-    a.fromBufferAttribute(pos, i).applyMatrix4(worldMat);
-    b.fromBufferAttribute(pos, i + 1).applyMatrix4(worldMat);
-    const ab = b.clone().sub(a);
-    const lenSq = ab.dot(ab);
-    const t = lenSq > 0.0001 ? Math.max(0, Math.min(1, target.clone().sub(a).dot(ab) / lenSq)) : 0;
-    const pt = a.clone().add(ab.multiplyScalar(t));
-    const d = pt.distanceTo(target);
-    if (d < bestDist) { bestDist = d; best = pt.clone(); }
-  }
-  return best;
-}
 
 function axisConstrain(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3 {
   const dx = Math.abs(b.x - a.x), dy = Math.abs(b.y - a.y), dz = Math.abs(b.z - a.z);
@@ -79,8 +36,10 @@ type CadViewerProps = {
   bgColor?: string;
   clippingPlane?: { axis: 'x' | 'y' | 'z'; value: number } | null;
   measureMode?: boolean;
+  selectionFilter?: "body" | "point";
   onSelectMesh?: (meshId: string | undefined) => void;
   onMeasured?: (distanceMm: number) => void;
+  onBodyMeasure?: (analysis: ShapeAnalysis, meshId: string) => void;
   ref?: Ref<CadViewerHandle>;
 };
 
@@ -94,6 +53,62 @@ type SceneMeshRecord = {
   edgeMaterial: THREE.LineBasicMaterial;
 };
 
+/**
+ * Compute edges per BREP face group so that flat-face tessellation diagonals
+ * get correct dihedral angles (≈0°) and are culled by the threshold.
+ * Without this, OCCT's per-face vertex pools give EdgesGeometry no adjacency
+ * across triangle boundaries, so every triangle edge renders.
+ */
+function buildFaceAwareEdges(geo: THREE.BufferGeometry, thresholdDeg: number): THREE.BufferGeometry {
+  const idx = geo.index;
+  const pos = geo.attributes.position;
+  const groups = geo.groups;
+
+  const allEdgePositions: number[] = [];
+
+  const processGroup = (startIdx: number, countIdx: number) => {
+    const numTri = Math.floor(countIdx / 3);
+    if (numTri === 0) return;
+
+    const subPos: number[] = [];
+    const subIdx: number[] = [];
+
+    for (let t = 0; t < numTri; t++) {
+      const base = subPos.length / 3;
+      const ia = startIdx + t * 3;
+      const a = idx ? idx.getX(ia)     : ia;
+      const b = idx ? idx.getX(ia + 1) : ia + 1;
+      const c = idx ? idx.getX(ia + 2) : ia + 2;
+      subPos.push(pos.getX(a), pos.getY(a), pos.getZ(a));
+      subPos.push(pos.getX(b), pos.getY(b), pos.getZ(b));
+      subPos.push(pos.getX(c), pos.getY(c), pos.getZ(c));
+      subIdx.push(base, base + 1, base + 2);
+    }
+
+    const subGeo = new THREE.BufferGeometry();
+    subGeo.setAttribute("position", new THREE.Float32BufferAttribute(subPos, 3));
+    subGeo.setIndex(subIdx);
+    const edgeGeo = new THREE.EdgesGeometry(subGeo, thresholdDeg);
+    const ePosArr = edgeGeo.attributes.position;
+    for (let i = 0; i < ePosArr.count; i++) {
+      allEdgePositions.push(ePosArr.getX(i), ePosArr.getY(i), ePosArr.getZ(i));
+    }
+    edgeGeo.dispose();
+    subGeo.dispose();
+  };
+
+  if (groups.length > 0) {
+    for (const g of groups) processGroup(g.start, g.count);
+  } else {
+    const totalIdx = idx ? idx.count : Math.floor(pos.count / 3) * 3;
+    processGroup(0, totalIdx);
+  }
+
+  const result = new THREE.BufferGeometry();
+  result.setAttribute("position", new THREE.Float32BufferAttribute(allEdgePositions, 3));
+  return result;
+}
+
 export function CadViewer({
   model,
   selectedMeshId,
@@ -105,8 +120,10 @@ export function CadViewer({
   bgColor,
   clippingPlane,
   measureMode,
+  selectionFilter = "point",
   onSelectMesh,
   onMeasured,
+  onBodyMeasure,
   ref,
 }: CadViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -128,6 +145,9 @@ export function CadViewer({
   const previewLineRef = useRef<THREE.Line | null>(null);
   const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
   const currentSnapRef = useRef<THREE.Vector3 | null>(null);
+  const hoveredMeshIdRef = useRef<string | null>(null);
+  const selectionFilterRef = useRef<"body" | "point">(selectionFilter);
+  const onBodyMeasureRef = useRef(onBodyMeasure);
   useEffect(() => { selectedMeshIdRef.current = selectedMeshId; }, [selectedMeshId]);
   useEffect(() => {
     measureModeRef.current = measureMode ?? false;
@@ -139,6 +159,8 @@ export function CadViewer({
   }, [measureMode]);
   useEffect(() => { onMeasuredRef.current = onMeasured; }, [onMeasured]);
   useEffect(() => { onSelectMeshRef.current = onSelectMesh; }, [onSelectMesh]);
+  useEffect(() => { selectionFilterRef.current = selectionFilter; }, [selectionFilter]);
+  useEffect(() => { onBodyMeasureRef.current = onBodyMeasure; }, [onBodyMeasure]);
 
   const setCameraOrientation = (orientation: CadViewOrientation) => {
     const camera = cameraRef.current;
@@ -147,17 +169,35 @@ export function CadViewer({
       return;
     }
 
-    const distance = modelSizeRef.current * 1.9;
-    const positions: Record<CadViewOrientation, THREE.Vector3> = {
+    // Frame the orientation around currently-visible bodies so that isolating a
+    // small body and then clicking Top/Front/Right/Iso keeps it filling the view.
+    const box = new THREE.Box3();
+    recordsRef.current.forEach((record) => {
+      if (record.mesh.visible) box.expandByObject(record.mesh);
+    });
+    const center = new THREE.Vector3();
+    let distance = modelSizeRef.current * 1.9;
+    if (!box.isEmpty()) {
+      const size = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      const maxSize = Math.max(size.x, size.y, size.z, 1);
+      distance = maxSize * 1.9;
+    }
+
+    const offsets: Record<CadViewOrientation, THREE.Vector3> = {
       iso: new THREE.Vector3(distance, distance * 0.78, distance),
       front: new THREE.Vector3(0, 0, distance),
       top: new THREE.Vector3(0, distance, 0.01),
       right: new THREE.Vector3(distance, 0, 0),
     };
 
-    camera.position.copy(positions[orientation]);
-    controls.target.set(0, 0, 0);
+    camera.position.copy(center).add(offsets[orientation]);
+    controls.target.copy(center);
     camera.lookAt(controls.target);
+    camera.near = Math.max(distance / 500, 0.01);
+    camera.far = distance * 20;
+    camera.updateProjectionMatrix();
     controls.update();
   };
 
@@ -315,7 +355,7 @@ export function CadViewer({
         opacity: 0.38,
       });
       const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(object.geometry, 18),
+        buildFaceAwareEdges(object.geometry, 30),
         edgeMaterial,
       );
       edges.scale.copy(object.scale);
@@ -336,91 +376,111 @@ export function CadViewer({
       });
     });
 
-    const meshRecordById = new Map(
-      recordsRef.current.map((record) => [record.meshId, record]),
-    );
-
-    type AssemblyInfo = {
+    // Hybrid explode: every part gets a guaranteed linear slot along the
+    // assembly's principal (stacking) axis, plus a radial offset perpendicular
+    // to that axis. The per-axis Trim X/Y/Z sliders then scale each world axis,
+    // so the user can dampen the linear stack independently of the lateral fan.
+    type ExplodePart = {
+      rec: SceneMeshRecord;
       center: THREE.Vector3;
-      size: number;
-      directMeshIds: string[];
-      childInfos: AssemblyInfo[];
+      size: THREE.Vector3;
+      maxSize: number;
+      idx: number;
     };
 
-    const buildAssembly = (treeNode: CadTreeNode): AssemblyInfo => {
-      const childInfos = treeNode.children.map(buildAssembly);
-      const box = new THREE.Box3();
-      const expandFromAssembly = (info: AssemblyInfo) => {
-        info.directMeshIds.forEach((meshId) => {
-          const rec = meshRecordById.get(meshId);
-          if (rec) box.expandByObject(rec.mesh);
-        });
-        info.childInfos.forEach(expandFromAssembly);
-      };
-      treeNode.meshIds.forEach((meshId) => {
-        const rec = meshRecordById.get(meshId);
-        if (rec) box.expandByObject(rec.mesh);
-      });
-      childInfos.forEach(expandFromAssembly);
-
+    const parts: ExplodePart[] = recordsRef.current.map((rec, idx) => {
+      const box = new THREE.Box3().setFromObject(rec.mesh);
       const center = new THREE.Vector3();
-      const size = new THREE.Vector3();
-      if (!box.isEmpty()) {
-        box.getCenter(center);
-        box.getSize(size);
-      }
+      const sizeVec = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(sizeVec);
       return {
+        rec,
         center,
-        size: Math.max(size.x, size.y, size.z, 1),
-        directMeshIds: treeNode.meshIds,
-        childInfos,
+        size: sizeVec,
+        maxSize: Math.max(sizeVec.x, sizeVec.y, sizeVec.z, 1),
+        idx,
       };
-    };
+    });
 
-    const rootInfo = buildAssembly(model.rootNode);
+    if (parts.length > 1) {
+      const assemblyCenter = new THREE.Vector3();
+      parts.forEach(p => assemblyCenter.add(p.center));
+      assemblyCenter.divideScalar(parts.length);
 
-    const walkAssembly = (info: AssemblyInfo, accumulated: THREE.Vector3) => {
-      const childCount = info.directMeshIds.length + info.childInfos.length;
-      let childIndex = 0;
-      const fallbackDir = (i: number) =>
-        new THREE.Vector3((i % 3) - 1, 0.25, i % 2 ? 1 : -1).normalize();
+      // Principal axis from the assembly bounding box shape (proportions, not
+      // part-center variance — a grid of small buttons would otherwise out-vote
+      // the few large plates and pick the wrong axis):
+      //   * Plate-stack / mould (one very thin bbox dim) → thinnest axis is
+      //     the stacking direction.
+      //   * Shaft / fixture (roughly equal short dims, one long) → longest
+      //     axis is the principal axis.
+      const PLATE_RATIO_THRESHOLD = 0.35;
+      const bboxMin = Math.min(size.x, size.y, size.z);
+      const bboxMax = Math.max(size.x, size.y, size.z);
+      const principalIdx: 0 | 1 | 2 =
+        bboxMin / Math.max(bboxMax, 1) < PLATE_RATIO_THRESHOLD
+          ? (size.x <= size.y && size.x <= size.z ? 0
+             : size.y <= size.z ? 1 : 2)
+          : (size.x >= size.y && size.x >= size.z ? 0
+             : size.y >= size.z ? 1 : 2);
+      const principalAxis = new THREE.Vector3();
+      principalAxis.setComponent(principalIdx, 1);
 
-      info.directMeshIds.forEach((meshId) => {
-        const rec = meshRecordById.get(meshId);
-        if (!rec) {
-          childIndex += 1;
-          return;
-        }
-        const meshBox = new THREE.Box3().setFromObject(rec.mesh);
-        const meshCenter = new THREE.Vector3();
-        meshBox.getCenter(meshCenter);
-        const dir = meshCenter.clone().sub(info.center);
-        if (dir.length() < 0.001) {
-          dir.copy(fallbackDir(childIndex));
-        } else {
-          dir.normalize();
-        }
-        const factor = childCount > 1 ? 0.5 : 0;
-        const offset = dir.multiplyScalar(info.size * factor);
-        rec.explodeDirection.copy(accumulated).add(offset);
-        childIndex += 1;
+      // Rank parts by their coord on the principal axis. Ties broken by idx so
+      // the ordering is stable across reloads.
+      const sorted = [...parts].sort((a, b) => {
+        const da = a.center.getComponent(principalIdx);
+        const db = b.center.getComponent(principalIdx);
+        return da === db ? a.idx - b.idx : da - db;
       });
+      const rankByIdx = new Map<number, number>();
+      sorted.forEach((p, rank) => rankByIdx.set(p.idx, rank));
 
-      info.childInfos.forEach((childInfo) => {
-        const dir = childInfo.center.clone().sub(info.center);
-        if (dir.length() < 0.001) {
-          dir.copy(fallbackDir(childIndex));
-        } else {
-          dir.normalize();
+      // Linear step: at least the thickest part along the principal axis, so
+      // even big plates clear their neighbours at master=1.0.
+      const maxSizeOnPrincipal = parts.reduce(
+        (m, p) => Math.max(m, p.size.getComponent(principalIdx)),
+        0,
+      );
+      const avgSize = parts.reduce((s, p) => s + p.maxSize, 0) / parts.length;
+      const linearStep = Math.max(maxSizeOnPrincipal * 1.1, avgSize * 1.3);
+      const midRank = (parts.length - 1) / 2;
+
+      // Radial scatter: small parts travel further than large ones so dowels
+      // and buttons clear the plate they were nested in.
+      const maxPartSize = parts.reduce((m, p) => Math.max(m, p.maxSize), 0);
+      const RADIAL_GAIN = 1.4;
+      const perp1Idx = ((principalIdx + 1) % 3) as 0 | 1 | 2;
+      const perp2Idx = ((principalIdx + 2) % 3) as 0 | 1 | 2;
+
+      parts.forEach(p => {
+        const rank = rankByIdx.get(p.idx) ?? 0;
+
+        // Linear: every part gets a unique slot along the principal axis.
+        const linear = principalAxis.clone()
+          .multiplyScalar((rank - midRank) * linearStep);
+
+        // Radial: offset from assembly axis projected into the perpendicular
+        // plane, then scaled by inverse size so small parts fan out further.
+        const radial = p.center.clone().sub(assemblyCenter);
+        radial.setComponent(principalIdx, 0);
+        const sizeRatio = p.maxSize / Math.max(maxPartSize, 1);
+        radial.multiplyScalar(1 + (1 - sizeRatio) * RADIAL_GAIN);
+
+        // Parts sitting exactly on the principal axis (no radial offset) get a
+        // deterministic angular fan-out so they don't visually stay glued.
+        if (radial.length() < avgSize * 0.05) {
+          const a = (p.idx / parts.length) * Math.PI * 2;
+          radial.setComponent(perp1Idx, Math.cos(a) * avgSize * 0.5);
+          radial.setComponent(perp2Idx, Math.sin(a) * avgSize * 0.5);
         }
-        const factor = childCount > 1 ? 0.5 : 0;
-        const offset = dir.multiplyScalar(info.size * factor);
-        walkAssembly(childInfo, accumulated.clone().add(offset));
-        childIndex += 1;
-      });
-    };
 
-    walkAssembly(rootInfo, new THREE.Vector3());
+        p.rec.explodeDirection.copy(linear).add(radial);
+      });
+    } else {
+      parts.forEach(p => p.rec.explodeDirection.set(0, 0, 0));
+    }
 
     // Measure overlay objects
     const previewLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
@@ -433,9 +493,10 @@ export function CadViewer({
     scene.add(previewLine);
     previewLineRef.current = previewLine;
 
+    const snapIndicatorMat = new THREE.MeshBasicMaterial({ color: "#22c55e", depthTest: false });
     const snapIndicator = new THREE.Mesh(
       new THREE.SphereGeometry(3.5, 12, 12),
-      new THREE.MeshBasicMaterial({ color: "#22c55e", depthTest: false }),
+      snapIndicatorMat,
     );
     snapIndicator.renderOrder = 1000;
     snapIndicator.visible = false;
@@ -445,26 +506,135 @@ export function CadViewer({
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
 
+    // Screen-space snap: project every visible edge to 2D pixels, find closest
+    // segment within a pixel radius. This is how SolidWorks/Fusion/Onshape snap —
+    // it works even when the cursor hovers over empty space (inside a hole, in
+    // section gaps, etc.) because it doesn't depend on a surface raycast hit.
+    const PIXEL_SNAP_RADIUS = 12;
+    const ENDPOINT_T_THRESHOLD = 0.08;  // segment param threshold for "this is a vertex"
+    type ScreenSnap = { point: THREE.Vector3; type: 'vertex' | 'edge'; distPx: number };
+
+    const _va = new THREE.Vector3();
+    const _vb = new THREE.Vector3();
+    const _pa = new THREE.Vector3();
+    const _pb = new THREE.Vector3();
+
+    const findScreenSpaceSnap = (event: { clientX: number; clientY: number }): ScreenSnap | null => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const sx = event.clientX - rect.left;
+      const sy = event.clientY - rect.top;
+      const W = rect.width, H = rect.height;
+      let best: ScreenSnap | null = null;
+
+      for (const rec of recordsRef.current) {
+        if (!rec.mesh.visible) continue;
+        rec.edges.updateMatrixWorld();
+        const edgePos = rec.edges.geometry.attributes.position as THREE.BufferAttribute | undefined;
+        if (!edgePos) continue;
+        const ewm = rec.edges.matrixWorld;
+        const count = edgePos.count;
+
+        for (let i = 0; i + 1 < count; i += 2) {
+          _va.fromBufferAttribute(edgePos, i).applyMatrix4(ewm);
+          _vb.fromBufferAttribute(edgePos, i + 1).applyMatrix4(ewm);
+          // World-space copies for the actual snap output (project() mutates in place)
+          _pa.copy(_va).project(camera);
+          _pb.copy(_vb).project(camera);
+          // Skip if both endpoints are clipped out of NDC z range
+          if ((_pa.z < -1 || _pa.z > 1) && (_pb.z < -1 || _pb.z > 1)) continue;
+
+          const ax = (_pa.x + 1) * 0.5 * W;
+          const ay = (1 - _pa.y) * 0.5 * H;
+          const bx = (_pb.x + 1) * 0.5 * W;
+          const by = (1 - _pb.y) * 0.5 * H;
+
+          // Quick reject: cursor outside expanded segment bbox
+          const minX = Math.min(ax, bx) - PIXEL_SNAP_RADIUS;
+          const maxX = Math.max(ax, bx) + PIXEL_SNAP_RADIUS;
+          const minY = Math.min(ay, by) - PIXEL_SNAP_RADIUS;
+          const maxY = Math.max(ay, by) + PIXEL_SNAP_RADIUS;
+          if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
+
+          const dx = bx - ax, dy = by - ay;
+          const lenSq = dx * dx + dy * dy;
+          let t = 0;
+          if (lenSq > 0.0001) t = Math.max(0, Math.min(1, ((sx - ax) * dx + (sy - ay) * dy) / lenSq));
+          const px = ax + t * dx, py = ay + t * dy;
+          const d = Math.hypot(px - sx, py - sy);
+          if (d > PIXEL_SNAP_RADIUS) continue;
+
+          const isEndpoint = t < ENDPOINT_T_THRESHOLD || t > 1 - ENDPOINT_T_THRESHOLD;
+          // Endpoints get a 4px attraction bonus so corners win ties over edge midpoints
+          const effective = d - (isEndpoint ? 4 : 0);
+          if (best && effective >= best.distPx) continue;
+
+          const point = _va.clone().lerp(_vb, t);
+          best = { point, type: isEndpoint ? 'vertex' : 'edge', distPx: effective };
+        }
+      }
+      return best;
+    };
+
+    const setSnapIndicatorColor = (type: 'vertex' | 'edge' | null) => {
+      if (type === 'vertex') snapIndicatorMat.color.set("#22c55e");      // green
+      else if (type === 'edge') snapIndicatorMat.color.set("#f59e0b");   // amber
+    };
+
     const getSnappedPoint = (event: { clientX: number; clientY: number }): THREE.Vector3 | null => {
+      // Stage 1: screen-space snap (works regardless of raycast hit)
+      const ssSnap = findScreenSpaceSnap(event);
+      if (ssSnap) {
+        setSnapIndicatorColor(ssSnap.type);
+        return ssSnap.point;
+      }
+      // Stage 2: fallback to surface raycast hit point (free-form point on a face)
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const meshes = recordsRef.current.map(r => r.mesh);
-      const hits = raycaster.intersectObjects(meshes, false);
+      const hits = raycaster.intersectObjects(recordsRef.current.map(r => r.mesh), false);
       if (hits.length === 0) return null;
-      const hitPoint = hits[0].point.clone();
-      const hitObject = hits[0].object as THREE.Mesh;
-      const threshold = modelSizeRef.current * 0.04;
-      const rec = recordsRef.current.find(r => r.mesh === hitObject);
-      const vSnap = nearestVertex(hitObject.geometry, hitObject.matrixWorld, hitPoint, threshold);
-      const eSnap = rec ? nearestEdgePoint(rec.edges.geometry, rec.edges.matrixWorld, hitPoint, threshold) : null;
-      if (vSnap && eSnap) return vSnap.distanceTo(hitPoint) <= eSnap.distanceTo(hitPoint) ? vSnap : eSnap;
-      return vSnap ?? eSnap ?? hitPoint;
+      // No edge nearby — show neutral indicator for surface snap
+      setSnapIndicatorColor('edge');
+      return hits[0].point.clone();
+    };
+
+    const applyHoverState = (meshId: string | null) => {
+      if (hoveredMeshIdRef.current !== null) {
+        const prev = recordsRef.current.find(r => r.meshId === hoveredMeshIdRef.current);
+        if (prev) {
+          const sel = prev.meshId === selectedMeshIdRef.current;
+          prev.materials.forEach(m => { m.emissive.set(sel ? "#38bdf8" : "#000000"); m.emissiveIntensity = sel ? 0.65 : 0; });
+        }
+      }
+      if (meshId !== null) {
+        const rec = recordsRef.current.find(r => r.meshId === meshId);
+        if (rec && rec.meshId !== selectedMeshIdRef.current) {
+          rec.materials.forEach(m => { m.emissive.set("#38bdf8"); m.emissiveIntensity = 0.25; });
+        }
+      }
+      hoveredMeshIdRef.current = meshId;
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (!measureModeRef.current) return;
+      // Hover highlight — always active
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hoverHits = raycaster.intersectObjects(recordsRef.current.map(r => r.mesh), false);
+      const hitId = (hoverHits[0]?.object.userData.meshId as string | undefined) ?? null;
+      if (hitId !== hoveredMeshIdRef.current) applyHoverState(hitId);
+
+      if (!measureModeRef.current || selectionFilterRef.current === "body") {
+        if (!measureModeRef.current) {
+          snapIndicator.visible = false;
+          previewLine.visible = false;
+          currentSnapRef.current = null;
+        }
+        return;
+      }
+
       const snapped = getSnappedPoint(event);
       if (!snapped) {
         snapIndicator.visible = false;
@@ -486,7 +656,16 @@ export function CadViewer({
         previewLine.visible = true;
       }
     };
+
+    const handlePointerLeave = () => {
+      applyHoverState(null);
+      snapIndicator.visible = false;
+      previewLine.visible = false;
+      currentSnapRef.current = null;
+    };
+
     renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
 
     const handleKeyDown = (e: KeyboardEvent) => { if (e.key === "Shift") shiftPressedRef.current = true; };
     const handleKeyUp = (e: KeyboardEvent) => { if (e.key === "Shift") shiftPressedRef.current = false; };
@@ -502,6 +681,23 @@ export function CadViewer({
       const hits = raycaster.intersectObjects(meshes, false);
 
       if (measureModeRef.current) {
+        if (selectionFilterRef.current === "body") {
+          const meshId = hits[0]?.object.userData.meshId as string | undefined;
+          if (!meshId) return;
+          const rec = recordsRef.current.find(r => r.meshId === meshId);
+          if (!rec) return;
+          const analysis = analyzeShape(rec.mesh.geometry);
+          onBodyMeasureRef.current?.(analysis, meshId);
+          rec.edgeMaterial.color.set("#f59e0b");
+          rec.edgeMaterial.opacity = 1;
+          rec.edges.visible = true;
+          setTimeout(() => {
+            const isSelected = rec.meshId === selectedMeshIdRef.current;
+            rec.edgeMaterial.color.set(isSelected ? "#38bdf8" : "#111827");
+            rec.edgeMaterial.opacity = isSelected ? 1 : 0.38;
+          }, 600);
+          return;
+        }
         const pt = currentSnapRef.current?.clone() ?? (hits.length > 0 ? hits[0].point.clone() : null);
         if (!pt) {
           // Clicked empty space — cancel in-progress measurement
@@ -515,14 +711,49 @@ export function CadViewer({
         }
 
         const makeDot = (pos: THREE.Vector3) => {
-          const dot = new THREE.Mesh(
-            new THREE.SphereGeometry(2.5, 10, 10),
-            new THREE.MeshBasicMaterial({ color: "#f59e0b", depthTest: false }),
-          );
-          dot.renderOrder = 999;
-          dot.position.copy(pos);
-          scene.add(dot);
-          measureObjectsRef.current.push(dot);
+          const mat = new THREE.LineBasicMaterial({ color: "#f59e0b", depthTest: false });
+          const distToCam = () => camera.position.distanceTo(pos);
+          // Size scales with distance so it stays screen-consistent
+          const r = distToCam() * 0.022;
+          const arm = r * 1.5;
+
+          // Ring
+          const ringPts: THREE.Vector3[] = [];
+          const SEG = 32;
+          for (let i = 0; i <= SEG; i++) {
+            const a = (i / SEG) * Math.PI * 2;
+            ringPts.push(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0));
+          }
+          const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPts), mat);
+          ring.renderOrder = 999;
+
+          // Horizontal arm
+          const hGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-arm, 0, 0),
+            new THREE.Vector3(-r * 1.05, 0, 0),
+            new THREE.Vector3(r * 1.05, 0, 0),
+            new THREE.Vector3(arm, 0, 0),
+          ]);
+          const hLine = new THREE.Line(hGeo, mat);
+          hLine.renderOrder = 999;
+
+          // Vertical arm
+          const vGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, -arm, 0),
+            new THREE.Vector3(0, -r * 1.05, 0),
+            new THREE.Vector3(0, r * 1.05, 0),
+            new THREE.Vector3(0, arm, 0),
+          ]);
+          const vLine = new THREE.Line(vGeo, mat);
+          vLine.renderOrder = 999;
+
+          const group = new THREE.Group();
+          group.add(ring, hLine, vLine);
+          group.position.copy(pos);
+          // Billboard: always face camera
+          group.onBeforeRender = (_r, _s, cam) => { group.quaternion.copy(cam.quaternion); };
+          scene.add(group);
+          measureObjectsRef.current.push(group);
         };
 
         if (measurePointARef.current === null) {
@@ -585,6 +816,7 @@ export function CadViewer({
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
@@ -614,6 +846,7 @@ export function CadViewer({
   }, [model]);
 
   useEffect(() => {
+    hoveredMeshIdRef.current = null;
     const sceneColor = bgColor ?? (viewportTheme === "light" ? "#f8fafc" : "#0b0f14");
     const renderer = rendererRef.current;
     if (renderer) {

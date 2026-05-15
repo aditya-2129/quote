@@ -23,3 +23,6 @@ CAD-driven tool for generating manufacturing quotes from STEP files.
 - **UI**: Keep components in `src/components/`, strictly typed.
 - **DB**: Sync `src/db/schema/` with Drizzle.
 - **Rust**: Only for system/window logic in `src-tauri/`.
+
+## Do Not Touch
+- **Explode algorithm** in `src/components/CadViewer.tsx` (the `ExplodePart` block: principal-axis detection via bbox aspect ratio, rank-based linear slots, size-scaled radial scatter, angular fan-out fallback). Tuned across mould, shaft-fixture and 2-body cases — do not refactor or "improve" without explicit request.

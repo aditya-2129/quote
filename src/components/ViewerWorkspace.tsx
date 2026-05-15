@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from "react";
+import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import {
@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   FileCheck2,
+  Focus,
   Gem,
   ScanLine,
   Settings2,
@@ -31,7 +32,7 @@ import {
 } from "@components/ViewIcons";
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult, CadMesh } from "@utils/index";
-import { analyzeShape } from "@utils/shapeAnalysis";
+import { analyzeShape, type ShapeAnalysis } from "@utils/shapeAnalysis";
 
 export function ViewerWorkspace({ cad, isImporting, onFile }: {
   cad: CadImportResult | null;
@@ -45,24 +46,24 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   const [displayMode, setDisplayMode] = useState<"solid" | "wireframe">("solid");
   const [showEdges, setShowEdges] = useState(true);
   const [orientation, setOrientation] = useState("iso");
-  const [sectionActive, setSectionActive] = useState(false);
-  const [sectionAxis, setSectionAxis] = useState<"x" | "y" | "z">("y");
-  const [sectionValue, setSectionValue] = useState(0);
   const [measureActive, setMeasureActive] = useState(false);
   const [measuredMm, setMeasuredMm] = useState<number | null>(null);
   const [measureStep, setMeasureStep] = useState<0 | 1>(0);
-
-  const toggleSection = useCallback(() => {
-    setSectionActive(v => {
-      if (v) setSectionValue(0);
-      else setSectionValue(0);
-      return !v;
-    });
-  }, []);
+  const [selectionFilter, setSelectionFilter] = useState<"body" | "point">("body");
+  const [bodyMeasure, setBodyMeasure] = useState<{ analysis: ShapeAnalysis; meshId: string } | null>(null);
+  const [preIsolateHidden, setPreIsolateHidden] = useState<Set<string> | null>(null);
+  const [explodeActive, setExplodeActive] = useState(false);
+  const [explodeMaster, setExplodeMaster] = useState(0);
+  const [explodeTrim, setExplodeTrim] = useState({ x: 1, y: 1, z: 1 });
+  const explode = useMemo(() => ({
+    x: explodeMaster * explodeTrim.x,
+    y: explodeMaster * explodeTrim.y,
+    z: explodeMaster * explodeTrim.z,
+  }), [explodeMaster, explodeTrim]);
 
   const toggleMeasure = useCallback(() => {
     setMeasureActive(v => {
-      if (v) { viewerRef.current?.clearMeasure(); setMeasuredMm(null); setMeasureStep(0); }
+      if (v) { viewerRef.current?.clearMeasure(); setMeasuredMm(null); setMeasureStep(0); setBodyMeasure(null); }
       return !v;
     });
   }, []);
@@ -72,8 +73,46 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
     setMeasureStep(0);
   }, []);
 
-  const sectionRange = cad ? (viewerRef.current?.getModelSize() ?? 420) / 2 : 210;
-  const clippingPlane = sectionActive ? { axis: sectionAxis, value: sectionValue } : null;
+  const handleBodyMeasure = useCallback((analysis: ShapeAnalysis, meshId: string) => {
+    setBodyMeasure({ analysis, meshId });
+  }, []);
+
+  const toggleIsolate = useCallback(() => {
+    if (!cad || !selectedId) return;
+    if (preIsolateHidden !== null) {
+      setHiddenIds(preIsolateHidden);
+      setPreIsolateHidden(null);
+    } else {
+      setPreIsolateHidden(hiddenIds);
+      setHiddenIds(new Set(cad.meshes.filter(m => m.id !== selectedId).map(m => m.id)));
+      setTimeout(() => viewerRef.current?.fit(selectedId), 0);
+    }
+  }, [cad, selectedId, hiddenIds, preIsolateHidden]);
+
+
+  // Exit isolate when selection changes
+  useEffect(() => {
+    setPreIsolateHidden(prev => {
+      if (prev !== null) setHiddenIds(prev);
+      return null;
+    });
+  }, [selectedId]);
+
+  // Reset viewer state on new file load
+  useEffect(() => {
+    setHiddenIds(new Set());
+    setSelectedId(undefined);
+    setPreIsolateHidden(null);
+    setBodyMeasure(null);
+    setMeasuredMm(null);
+    setMeasureActive(false);
+    setMeasureStep(0);
+    setExplodeActive(false);
+    setExplodeMaster(0);
+    setExplodeTrim({ x: 1, y: 1, z: 1 });
+  }, [cad]);
+
+  const clippingPlane = null;
 
   const selectedMesh = useMemo(() => cad?.meshes.find(m => m.id === selectedId), [cad, selectedId]);
 
@@ -202,40 +241,70 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
           </div>
           <div className="tool-divider" />
           <div className="tool-group">
-            <button className={`tool-btn ${sectionActive ? "on" : ""}`} title="Section plane" onClick={toggleSection} disabled={!cad}><SectionIcon size={22} /></button>
+            <button className="tool-btn" title="Coming soon" disabled style={{ cursor: "not-allowed", opacity: 0.4 }}><SectionIcon size={22} /></button>
+            <button className={`tool-btn ${preIsolateHidden !== null ? "on" : ""}`} title={preIsolateHidden !== null ? "Exit isolate" : "Isolate selected"} onClick={toggleIsolate} disabled={!cad || !selectedId}><Focus size={18} /></button>
             <button className={`tool-btn ${measureActive ? "on" : ""}`} title="Measure distance" onClick={toggleMeasure} disabled={!cad}><MeasureIcon size={22} /></button>
-            <button className="tool-btn" title="Explode view" disabled={!cad}><ExplodeIcon size={22} /></button>
+            <button className={`tool-btn ${explodeActive ? "on" : ""}`} title="Explode view" onClick={() => { setExplodeActive(v => { if (v) { setExplodeMaster(0); setExplodeTrim({ x: 1, y: 1, z: 1 }); } return !v; }); }} disabled={!cad}><ExplodeIcon size={22} /></button>
           </div>
           <div className="right">
             <span className="tool-label">mm · ISO</span>
           </div>
         </div>
 
-        {sectionActive && (
+
+        {explodeActive && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--panel-2)", borderBottom: "1px solid var(--divider)", fontSize: 12 }}>
-            <span style={{ color: "var(--text-3)" }}>Section axis</span>
-            {(["x","y","z"] as const).map(ax => (
-              <button key={ax} className={`btn sm ${sectionAxis === ax ? "" : "ghost"}`} style={{ minWidth: 28, padding: "2px 8px", textTransform: "uppercase" }} onClick={() => { setSectionAxis(ax); setSectionValue(0); }}>{ax}</button>
-            ))}
-            <input type="range" min={-sectionRange} max={sectionRange} step={1} value={sectionValue}
-              onChange={e => setSectionValue(Number(e.target.value))}
+            <span style={{ color: "var(--text-3)" }}>Explode</span>
+            <input type="range" min={0} max={2} step={0.01} value={explodeMaster}
+              onChange={e => setExplodeMaster(Number(e.target.value))}
               style={{ flex: 1, accentColor: "var(--accent)" }} />
-            <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-2)", minWidth: 60, textAlign: "right" }}>{(sectionValue / (viewerRef.current?.getModelSize() ?? 420) * 100).toFixed(0)}%</span>
-            <button className="tool-btn" title="Close section" onClick={toggleSection}><X size={13} /></button>
+            <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-2)", minWidth: 38, textAlign: "right" }}>{Math.round(explodeMaster * 100)}%</span>
+
+            <span style={{ color: "var(--text-3)", marginLeft: 8 }}>Trim</span>
+            {(["x", "y", "z"] as const).map(axis => (
+              <div key={axis} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ color: "var(--text-2)", textTransform: "uppercase", fontFamily: "var(--font-mono)", width: 10 }}>{axis}</span>
+                <input type="range" min={0} max={2} step={0.01} value={explodeTrim[axis]}
+                  onChange={e => setExplodeTrim(prev => ({ ...prev, [axis]: Number(e.target.value) }))}
+                  style={{ width: 64, accentColor: "var(--accent)" }} />
+              </div>
+            ))}
+            <button className="btn sm ghost" style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setExplodeTrim({ x: 1, y: 1, z: 1 })}>Reset</button>
+            <button className="tool-btn" title="Close explode" onClick={() => { setExplodeActive(false); setExplodeMaster(0); setExplodeTrim({ x: 1, y: 1, z: 1 }); }}><X size={13} /></button>
           </div>
         )}
 
         {measureActive && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "var(--panel-2)", borderBottom: "1px solid var(--divider)", fontSize: 12 }}>
             <TbRulerMeasure size={14} style={{ color: "var(--accent-text)", flexShrink: 0 }} />
-            {measuredMm === null
-              ? <span style={{ color: "var(--text-2)" }}>{measureStep === 0 ? "Click first point on the model" : "Click second point"}</span>
-              : <>
-                  <span style={{ color: "var(--text-2)" }}>Distance:</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text-1)" }}>{measuredMm.toFixed(2)} mm</span>
-                  <button className="btn sm ghost" onClick={() => { viewerRef.current?.clearMeasure(); setMeasuredMm(null); setMeasureStep(0); }}>Clear</button>
-                </>
-            }
+            <div style={{ display: "flex", gap: 2, background: "var(--panel-3)", borderRadius: 5, padding: 2 }}>
+              <button className={`btn sm ${selectionFilter === "body" ? "" : "ghost"}`} style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => { setSelectionFilter("body"); setBodyMeasure(null); viewerRef.current?.clearMeasure(); setMeasuredMm(null); setMeasureStep(0); }}>Body</button>
+              <button className={`btn sm ${selectionFilter === "point" ? "" : "ghost"}`} style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => { setSelectionFilter("point"); setBodyMeasure(null); }}>Point</button>
+            </div>
+            {selectionFilter === "body" ? (
+              bodyMeasure === null
+                ? <span style={{ color: "var(--text-2)" }}>Click a body to inspect</span>
+                : (() => {
+                    const { analysis } = bodyMeasure;
+                    const fmt = (v: number) => `${v.toFixed(2)} mm`;
+                    let label = "";
+                    if (analysis.kind === "cylinder") label = `Ø ${fmt(analysis.outerDiaMm)}${analysis.innerDiaMm != null ? ` · Inner Ø ${fmt(analysis.innerDiaMm)}` : ""} · Length ${fmt(analysis.lengthMm)}`;
+                    else if (analysis.kind === "hex") label = `Hex AF ${fmt(analysis.afMm)} · Length ${fmt(analysis.lengthMm)}`;
+                    else label = `${fmt(analysis.xMm)} × ${fmt(analysis.yMm)} × ${fmt(analysis.zMm)}`;
+                    return <>
+                      <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text-1)" }}>{label}</span>
+                      <button className="btn sm ghost" onClick={() => setBodyMeasure(null)}>Clear</button>
+                    </>;
+                  })()
+            ) : (
+              measuredMm === null
+                ? <span style={{ color: "var(--text-2)" }}>{measureStep === 0 ? "Click first point on the model" : "Click second point"}</span>
+                : <>
+                    <span style={{ color: "var(--text-2)" }}>Distance:</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text-1)" }}>{measuredMm.toFixed(2)} mm</span>
+                    <button className="btn sm ghost" onClick={() => { viewerRef.current?.clearMeasure(); setMeasuredMm(null); setMeasureStep(0); }}>Clear</button>
+                  </>
+            )}
             <button className="tool-btn" style={{ marginLeft: "auto" }} title="Close measure" onClick={toggleMeasure}><X size={13} /></button>
           </div>
         )}
@@ -249,12 +318,14 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               hiddenMeshIds={hiddenIds}
               displayMode={displayMode}
               viewportTheme="light"
-              explode={{ x: 0, y: 0, z: 0 }}
+              explode={explode}
               showEdges={showEdges}
               clippingPlane={clippingPlane}
               measureMode={measureActive}
+              selectionFilter={selectionFilter}
               onMeasured={handleMeasured}
-              onSelectMesh={id => { if (!measureActive) { setSelectedId(id); setMeasureStep(0); } else { setMeasureStep(s => s === 0 ? 1 : 0); } }}
+              onBodyMeasure={handleBodyMeasure}
+              onSelectMesh={id => { if (!measureActive) { setSelectedId(id); setMeasureStep(0); } else if (selectionFilter === "point") { setMeasureStep(s => s === 0 ? 1 : 0); } }}
             />
             <div className="canvas-hud-top">
               <span className="pill"><Box size={11} /> {cad.fileName}</span>
