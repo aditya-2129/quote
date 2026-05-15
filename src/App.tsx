@@ -26,7 +26,7 @@ function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route element={<Layout />}>
+        <Route element={<CadProvider><Layout /></CadProvider>}>
           <Route index element={<Navigate to="/quotes" replace />} />
           <Route path="/viewer" element={<ViewerPage />} />
           <Route path="/rfqs" element={<RfqsPage />} />

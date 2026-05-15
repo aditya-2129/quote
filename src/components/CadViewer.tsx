@@ -790,7 +790,7 @@ export function CadViewer({
     };
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
 
-    const resize = () => {
+const resize = () => {
       const bounds = container.getBoundingClientRect();
       const width = Math.max(container.clientWidth || bounds.width, 1);
       const height = Math.max(container.clientHeight || bounds.height, 420);
@@ -804,11 +804,36 @@ export function CadViewer({
     setCameraOrientation("iso");
     fitCamera();
 
+    // ── Axis gizmo ───────────────────────────────────────────────────────────
+    const gizmoScene = new THREE.Scene();
+    const makeArrow = (dir: THREE.Vector3, color: string) =>
+      new THREE.ArrowHelper(dir, new THREE.Vector3(), 0.75, color, 0.28, 0.13);
+    gizmoScene.add(makeArrow(new THREE.Vector3(1, 0, 0), "#ef4444")); // X red
+    gizmoScene.add(makeArrow(new THREE.Vector3(0, 1, 0), "#22c55e")); // Y green
+    gizmoScene.add(makeArrow(new THREE.Vector3(0, 0, 1), "#3b82f6")); // Z blue
+    gizmoScene.add(new THREE.AmbientLight("#ffffff", 3));
+    const gizmoCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+    const GIZMO_PX = 80; // CSS pixels
+
     let frame = 0;
     const animate = () => {
       frame = window.requestAnimationFrame(animate);
       controls.update();
+
+      // Main scene
+      renderer.setScissorTest(false);
       renderer.render(scene, camera);
+
+      // Gizmo in bottom-left corner
+      gizmoCamera.position.set(0, 0, 2.5).applyQuaternion(camera.quaternion);
+      gizmoCamera.quaternion.copy(camera.quaternion);
+      renderer.setViewport(10, 10, GIZMO_PX, GIZMO_PX);
+      renderer.setScissor(10, 10, GIZMO_PX, GIZMO_PX);
+      renderer.setScissorTest(true);
+      renderer.clearDepth();
+      renderer.render(gizmoScene, gizmoCamera);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
     };
     animate();
 

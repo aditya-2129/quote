@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import {
@@ -7,11 +8,8 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
-  FileCheck2,
   Focus,
-  Gem,
-  ScanLine,
-  Settings2,
+  ReceiptText,
   X,
 } from "lucide-react";
 import { TbRulerMeasure } from "react-icons/tb";
@@ -31,16 +29,16 @@ import {
   ScreenshotIcon,
 } from "@components/ViewIcons";
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
-import type { CadImportResult, CadMesh } from "@utils/index";
-import { analyzeShape, type ShapeAnalysis } from "@utils/shapeAnalysis";
+import type { CadImportResult } from "@utils/index";
+import { analyzeShape, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
 
 export function ViewerWorkspace({ cad, isImporting, onFile }: {
   cad: CadImportResult | null;
   isImporting: boolean;
   onFile: (file?: File) => Promise<void>;
 }) {
+  const navigate = useNavigate();
   const viewerRef = useRef<CadViewerHandle | null>(null);
-  const [leftTab, setLeftTab] = useState<"bodies" | "materials">("bodies");
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [displayMode, setDisplayMode] = useState<"solid" | "wireframe">("solid");
@@ -116,15 +114,14 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
 
   const selectedMesh = useMemo(() => cad?.meshes.find(m => m.id === selectedId), [cad, selectedId]);
 
+  const selectedStats = useMemo(
+    () => selectedMesh ? computeMeshStats(selectedMesh.geometry) : null,
+    [selectedMesh],
+  );
+
   const toggleHide = (id: string) => {
     setHiddenIds(cur => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
-
-  const uniqueColors = useMemo(() => {
-    if (!cad) return [] as CadMesh[];
-    const seen = new Set<string>();
-    return cad.meshes.filter(m => { if (seen.has(m.color)) return false; seen.add(m.color); return true; });
-  }, [cad]);
 
   const geo = cad?.geometry;
 
@@ -133,12 +130,11 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
       {/* Left panel */}
       <div className="panel">
         <div className="tabstrip">
-          <button className={leftTab === "bodies" ? "on" : ""} onClick={() => setLeftTab("bodies")}><BoxesIcon size={13} /> Parts Tree</button>
-          <button className={leftTab === "materials" ? "on" : ""} onClick={() => setLeftTab("materials")}><Gem size={13} /> Materials</button>
+          <button className="on"><BoxesIcon size={13} /> Parts Tree</button>
         </div>
 
         <div className="tree-section">
-          {leftTab === "bodies" && (
+          {(
             cad ? (
               <div className="tree-group">
                 <div className="tree-group-head">
@@ -175,30 +171,18 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               </div>
             ) : <div style={{ padding: "16px 12px", color: "var(--text-3)", fontSize: 12 }}>No bodies loaded</div>
           )}
-
-          {leftTab === "materials" && (
-            <div style={{ padding: "6px 10px" }}>
-              {uniqueColors.map(m => (
-                <div className="kv" key={m.id} style={{ borderBottom: "1px dashed var(--divider)", padding: "8px 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ width: 12, height: 12, background: m.color, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 3, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12 }}>{m.name}</span>
-                  </div>
-                  <span className="v" style={{ fontSize: 10.5, color: "var(--text-3)" }}>{m.color.replace("#", "").toUpperCase()}</span>
-                </div>
-              ))}
-              {uniqueColors.length === 0 && <div style={{ color: "var(--text-3)", fontSize: 12 }}>No materials loaded</div>}
-            </div>
-          )}
         </div>
 
         {cad && (
           <div className="left-foot">
-            <div className="file">
-              <span className="ic"><FileCheck2 size={14} /></span>
-              <span className="name">{cad.fileName}</span>
-              <span className="units">mm</span>
-            </div>
+            <button
+              className="btn"
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, fontWeight: 600 }}
+              onClick={() => navigate("/quotes")}
+            >
+              <ReceiptText size={14} />
+              Move to Quotation
+            </button>
           </div>
         )}
       </div>
@@ -331,9 +315,6 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               <span className="pill"><Box size={11} /> {cad.fileName}</span>
               <span className="pill">{cad.meshes.length} bodies</span>
             </div>
-            <div className="canvas-hud-bot">
-              <button className="zoom-btn" onClick={() => viewerRef.current?.fit()}><FitViewIcon size={14} /></button>
-            </div>
           </div>
         ) : (
           <div className="viewer-drop">
@@ -352,36 +333,28 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
       <div className="panel">
         <div className="panel-head">
           <span className="title">Inspector</span>
-          <div className="right">
-            <button className="tool-btn on" title="Details"><ScanLine size={14} /></button>
-            <button className="tool-btn" title="Settings"><Settings2 size={14} /></button>
-          </div>
         </div>
 
         <div style={{ overflow: "auto", flex: 1 }}>
           {geo ? (
             <>
               <div className="insp-section">
-                <h4>Geometry</h4>
+                <h4>Geometry {selectedStats && <span style={{ fontWeight: 400, color: "var(--text-3)", fontSize: 10 }}>— selected part</span>}</h4>
                 <div className="insp-tile-row">
                   <div className="insp-tile">
                     <div className="label">Volume</div>
-                    <div className="value">{((geo.volumeMm3 ?? 0) / 1000).toFixed(2)} <span className="muted">cm³</span></div>
-                  </div>
-                  <div className="insp-tile">
-                    <div className="label">Surface</div>
-                    <div className="value">{((geo.surfaceAreaMm2 ?? 0) / 100).toFixed(2)} <span className="muted">cm²</span></div>
+                    <div className="value">{((selectedStats ? selectedStats.volumeMm3 : (geo.volumeMm3 ?? 0)) / 1000).toFixed(2)} <span className="muted">cm³</span></div>
                   </div>
                 </div>
-                <div className="kv"><span className="k">Bounding · X</span><span className="v">{(geo.boundingBoxMm?.x ?? 0).toFixed(2)} mm</span></div>
-                <div className="kv"><span className="k">Bounding · Y</span><span className="v">{(geo.boundingBoxMm?.y ?? 0).toFixed(2)} mm</span></div>
-                <div className="kv"><span className="k">Bounding · Z</span><span className="v">{(geo.boundingBoxMm?.z ?? 0).toFixed(2)} mm</span></div>
-              </div>
-              <div className="insp-section">
-                <h4>Mesh</h4>
-                <div className="kv"><span className="k">Bodies</span><span className="v">{cad?.meshes.length ?? 0}</span></div>
-                <div className="kv"><span className="k">Vertices</span><span className="v">{(geo.vertexCount ?? 0).toLocaleString()}</span></div>
-                <div className="kv"><span className="k">Triangles</span><span className="v">{(geo.faceCount ?? 0).toLocaleString()}</span></div>
+                {selectedStats ? <>
+                  <div className="kv"><span className="k">Bounding · X</span><span className="v">{selectedStats.boundingBoxMm.x.toFixed(2)} mm</span></div>
+                  <div className="kv"><span className="k">Bounding · Y</span><span className="v">{selectedStats.boundingBoxMm.y.toFixed(2)} mm</span></div>
+                  <div className="kv"><span className="k">Bounding · Z</span><span className="v">{selectedStats.boundingBoxMm.z.toFixed(2)} mm</span></div>
+                </> : <>
+                  <div className="kv"><span className="k">Bounding · X</span><span className="v">{(geo.boundingBoxMm?.x ?? 0).toFixed(2)} mm</span></div>
+                  <div className="kv"><span className="k">Bounding · Y</span><span className="v">{(geo.boundingBoxMm?.y ?? 0).toFixed(2)} mm</span></div>
+                  <div className="kv"><span className="k">Bounding · Z</span><span className="v">{(geo.boundingBoxMm?.z ?? 0).toFixed(2)} mm</span></div>
+                </>}
               </div>
             </>
           ) : (
@@ -390,7 +363,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             </div>
           )}
 
-          {selectedMesh && (() => {
+          {selectedMesh && selectedStats && (() => {
             const shape = analyzeShape(selectedMesh.geometry);
             const mm = (v: number) => <><span style={{ fontFamily: "var(--font-mono)" }}>{v.toFixed(2)}</span><span style={{ color: "var(--text-4)", fontSize: 10, marginLeft: 3 }}>mm</span></>;
             return (
@@ -426,6 +399,26 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               </>
             );
           })()}
+
+          <div style={{ marginTop: "auto", padding: "14px 14px 10px", borderTop: "1px solid var(--divider)" }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-3)", marginBottom: 8 }}>CONTROLS</div>
+            {([
+              ["Rotate",   "Middle mouse drag"],
+              ["Pan",      "Right mouse drag"],
+              ["Zoom",     "Scroll wheel"],
+              ["Select",   "Left click body"],
+              ["Fit",      "Fit btn in toolbar"],
+              ["Hide",     "Eye icon in tree"],
+              ["Isolate",  "Select → isolate btn"],
+              ["Measure",  "Ruler btn → click pts"],
+              ["Explode",  "Explode btn → slider"],
+            ] as [string, string][]).map(([action, hint]) => (
+              <div key={action} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0", borderBottom: "1px dashed var(--divider)" }}>
+                <span style={{ fontSize: 11, color: "var(--text-2)" }}>{action}</span>
+                <span style={{ fontSize: 10, color: "var(--text-3)", fontFamily: "var(--font-mono)" }}>{hint}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
-import { importStepFile } from "@utils/index";
-import type { CadImportResult } from "@utils/index";
+import { useEffect } from "react";
 import { ViewerWorkspace } from "@components/ViewerWorkspace";
+import { useCad } from "@context/CadContext";
 
 declare global {
   interface Window {
@@ -10,8 +9,7 @@ declare global {
 }
 
 export function ViewerPage() {
-  const [cad, setCad] = useState<CadImportResult | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
+  const { cad, isImporting, handleFile } = useCad();
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -22,19 +20,6 @@ export function ViewerPage() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-
-  const handleFile = async (file?: File) => {
-    if (!file) return;
-    setIsImporting(true);
-    try {
-      const result = await importStepFile(file);
-      setCad(result);
-    } catch {
-      // import failed — user can retry
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
   return (
     <div className="page">

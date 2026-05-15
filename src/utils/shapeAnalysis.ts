@@ -26,6 +26,54 @@ function axisIdx(k: AxisKey): AxisIdx {
   return (k === "x" ? 0 : k === "y" ? 1 : 2) as AxisIdx;
 }
 
+export type MeshStats = {
+  volumeMm3: number;
+  surfaceAreaMm2: number;
+  boundingBoxMm: { x: number; y: number; z: number };
+  vertexCount: number;
+  triangleCount: number;
+};
+
+export function computeMeshStats(geo: THREE.BufferGeometry): MeshStats {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const size = new THREE.Vector3();
+  bb.getSize(size);
+
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  const triCount = pos ? (idx ? Math.floor(idx.count / 3) : Math.floor(pos.count / 3)) : 0;
+
+  let surfaceAreaMm2 = 0;
+  let volumeMm3 = 0;
+
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const cross = new THREE.Vector3();
+
+  for (let t = 0; t < triCount; t++) {
+    const a = idx ? idx.getX(t * 3)     : t * 3;
+    const b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+    const c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+    v0.fromBufferAttribute(pos, a);
+    v1.fromBufferAttribute(pos, b);
+    v2.fromBufferAttribute(pos, c);
+    cross.crossVectors(v1.clone().sub(v0), v2.clone().sub(v0));
+    surfaceAreaMm2 += cross.length() * 0.5;
+    // Signed volume contribution via divergence theorem
+    volumeMm3 += v0.dot(v1.clone().cross(v2)) / 6;
+  }
+
+  return {
+    volumeMm3: Math.abs(volumeMm3),
+    surfaceAreaMm2,
+    boundingBoxMm: { x: size.x, y: size.y, z: size.z },
+    vertexCount: pos?.count ?? 0,
+    triangleCount: triCount,
+  };
+}
+
 export function analyzeShape(geo: THREE.BufferGeometry): ShapeAnalysis {
   geo.computeBoundingBox();
   const bb = geo.boundingBox!;
