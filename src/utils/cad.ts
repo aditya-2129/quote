@@ -372,8 +372,8 @@ export async function importStepBytes(
       }
 
       return createCadMesh(
-        `mesh-${index}`,
-        mesh.name?.trim() || `Mesh ${index + 1}`,
+        `part-${index}`,
+        mesh.name?.trim() || `Part ${index + 1}`,
         geo.geometry,
         colorToHex(mesh.color),
         index,

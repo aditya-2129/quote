@@ -1,14 +1,21 @@
 import {
+  memo,
+  useCallback,
+  useDeferredValue,
   useState,
   useEffect,
+  useMemo,
   useRef,
 } from "react";
 import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
 import type { Part, Op, Stock } from "@utils/quoteTypes";
+import { QuotePreviewViewer, type QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
+import type { CadImportResult } from "@utils/index";
 import {
   Box,
+  Boxes,
   BoxesIcon,
   Check,
   ChevronDown,
@@ -29,13 +36,13 @@ import {
   Percent,
   Plus,
   Save,
-  Scale,
   ScanLine,
   Search,
   Send,
   Settings2,
   ShieldCheck,
   Sliders,
+  Square,
   Truck,
   TriangleAlert,
   X,
@@ -244,6 +251,46 @@ function QuotePreview({ parts, selectedId, onSelect, title }: { parts:Part[]; se
 }
 
 /* ===========================================================
+   CAD preview (real Three.js model)
+   =========================================================== */
+
+function QuoteCadPreview({ model, selectedId, selectedMeshIds, showAll }: {
+  model: CadImportResult;
+  selectedId: string | null;
+  selectedMeshIds: string[];
+  showAll: boolean;
+}) {
+  const viewerRef = useRef<QuotePreviewViewerHandle | null>(null);
+  const isolate = !showAll && selectedId !== null && selectedMeshIds.length > 0;
+
+  const selectedMeshIdSet = useMemo(() => new Set(selectedMeshIds), [selectedMeshIds]);
+
+  const hiddenMeshIds = useMemo(() => {
+    if (!isolate) return new Set<string>();
+    return new Set(model.meshes.filter(m => !selectedMeshIdSet.has(m.id)).map(m => m.id));
+  }, [isolate, selectedMeshIdSet, model]);
+
+  useEffect(() => {
+    const id = setTimeout(
+      () => viewerRef.current?.fit(isolate ? selectedMeshIds : undefined),
+      60,
+    );
+    return () => clearTimeout(id);
+  }, [isolate, selectedMeshIds, model]);
+
+  return (
+    <div className="canvas" style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <QuotePreviewViewer
+        ref={viewerRef}
+        model={model}
+        selectedMeshIds={selectedMeshIdSet}
+        hiddenMeshIds={hiddenMeshIds}
+      />
+    </div>
+  );
+}
+
+/* ===========================================================
    Operations editor
    =========================================================== */
 
@@ -376,6 +423,39 @@ function MaterialCard({ materialId }: { materialId:string }) {
    Parts table
    =========================================================== */
 
+type RowProps = {
+  p: Part;
+  isSel: boolean;
+  asmQty: number;
+  onSelect: (id: string) => void;
+  onUpdate: (id: string, patch: Partial<Part>) => void;
+};
+
+const PartRow = memo(function PartRow({ p, isSel, asmQty, onSelect, onUpdate }: RowProps) {
+  const qty = partQty(p, asmQty);
+  const sub = partSubtotal(p, asmQty);
+  const ops = p.operations || [];
+  const totalMin = ops.reduce((a, op) => a + opMinutes(op, qty), 0);
+  const machineTags = ops.slice(0, 3).map(o => MACHINES[o.machine]?.short || o.machine);
+  return (
+    <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""}`} onClick={() => onSelect(p.id)}>
+      <td className="include-cell"><input type="checkbox" checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
+      <td><div className="body-cell"><span className="swatch" style={{background:p.color}}/><div style={{minWidth:0}}>
+        <div className="pname">{p.name}</div>
+        <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
+          {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{SHAPES[p.stock.shape]?.dims.map(k=>p.stock?.dims[k]).join("×")} mm</span>}
+        </div>
+      </div></div></td>
+      <td><select value={p.material} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{material:e.target.value})}>{Object.entries(MATERIALS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></td>
+      <td className="num"><input type="number" className="qty-input" value={p.perAssembly} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{perAssembly:+e.target.value||0})}/></td>
+      <td className="num muted">{qty}</td>
+      <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
+      <td className="num">{p.included?fmtINR(sub):"—"}</td>
+      <td><button className="more-btn" onClick={e=>e.stopPropagation()}><MoreHorizontal size={14}/></button></td>
+    </tr>
+  );
+});
+
 function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery }: {
   parts:Part[]; setParts:(p:Part[])=>void;
   asmQty:number; selectedId:string|null;
@@ -390,6 +470,18 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
     document.addEventListener("mousedown",onDoc);
     return ()=>document.removeEventListener("mousedown",onDoc);
   },[bulkOpen]);
+
+  // Keep stable callbacks so memoized rows don't re-render when only selectedId changes.
+  const partsRef = useRef(parts);
+  partsRef.current = parts;
+  const setPartsRef = useRef(setParts);
+  setPartsRef.current = setParts;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const stableUpdate = useCallback((id: string, patch: Partial<Part>) => {
+    setPartsRef.current(partsRef.current.map(p => p.id === id ? { ...p, ...patch } : p));
+  }, []);
+  const stableSelect = useCallback((id: string) => { onSelectRef.current(id); }, []);
 
   const counts={included:parts.filter(p=>p.included).length,machined:parts.filter(p=>!p.stocked).length,purchased:parts.filter(p=>p.stocked).length,excluded:parts.filter(p=>!p.included).length};
   const q=searchQuery.trim().toLowerCase();
@@ -406,7 +498,6 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
   });
 
   const totalAmount=filtered.reduce((a,p)=>a+partSubtotal(p,asmQty),0);
-  function update(id:string, patch:Partial<Part>) { setParts(parts.map(p=>p.id===id?{...p,...patch}:p)); }
   function bulkApply(patch:Partial<Part>) { const ids=new Set(filtered.map(p=>p.id)); setParts(parts.map(p=>ids.has(p.id)?{...p,...patch}:p)); setBulkOpen(false); }
 
   return (
@@ -441,7 +532,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
         <thead>
           <tr>
             <th className="include-cell"/>
-            <th>Body</th><th>Material</th>
+            <th>Part</th><th>Material</th>
             <th className="num">Per asm</th><th className="num">Qty</th>
             <th>Machining</th><th className="num">Subtotal</th>
             <th style={{width:32}}/>
@@ -449,29 +540,16 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
         </thead>
         <tbody>
           {filtered.length===0&&<tr><td colSpan={8}><div className="empty-state" style={{padding:"30px 18px"}}><div className="es-ic"><Search size={18}/></div><div className="es-title">No parts match the filter</div><div className="es-hint">Clear the search or pick a different filter.</div></div></td></tr>}
-          {filtered.map(p=>{
-            const qty=partQty(p,asmQty), sub=partSubtotal(p,asmQty), isSel=selectedId===p.id;
-            const totalMin=(p.operations||[]).reduce((a,op)=>a+opMinutes(op,qty),0);
-            const ops=p.operations||[];
-            const machineTags=ops.slice(0,3).map(o=>MACHINES[o.machine]?.short||o.machine);
-            return (
-              <tr key={p.id} className={`${isSel?"sel":""} ${!p.included?"excluded":""}`} onClick={()=>onSelect(p.id)}>
-                <td className="include-cell" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={p.included} onChange={()=>update(p.id,{included:!p.included})}/></td>
-                <td><div className="body-cell"><span className="swatch" style={{background:p.color}}/><div style={{minWidth:0}}>
-                  <div className="pname">{p.name}</div>
-                  <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
-                    {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{SHAPES[p.stock.shape]?.dims.map(k=>p.stock?.dims[k]).join("×")} mm</span>}
-                  </div>
-                </div></div></td>
-                <td onClick={e=>e.stopPropagation()}><select value={p.material} onChange={e=>update(p.id,{material:e.target.value})}>{Object.entries(MATERIALS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></td>
-                <td className="num" onClick={e=>e.stopPropagation()}><input type="number" className="qty-input" value={p.perAssembly} onChange={e=>update(p.id,{perAssembly:+e.target.value||0})}/></td>
-                <td className="num muted">{qty}</td>
-                <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
-                <td className="num">{p.included?fmtINR(sub):"—"}</td>
-                <td onClick={e=>e.stopPropagation()}><button className="more-btn"><MoreHorizontal size={14}/></button></td>
-              </tr>
-            );
-          })}
+          {filtered.map(p => (
+            <PartRow
+              key={p.id}
+              p={p}
+              isSel={selectedId === p.id}
+              asmQty={asmQty}
+              onSelect={stableSelect}
+              onUpdate={stableUpdate}
+            />
+          ))}
           <tr className="totals"><td colSpan={6} style={{color:"var(--text-3)"}}>Filtered subtotal · {filtered.length} of {parts.length} parts</td><td className="num">{fmtINR(totalAmount)}</td><td/></tr>
         </tbody>
       </table>
@@ -483,7 +561,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
    DFM panel
    =========================================================== */
 
-function DfmPanel({ parts, onSelectPart, asmQty }: { parts:Part[]; onSelectPart:(id:string)=>void; asmQty:number }) {
+const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty }: { parts:Part[]; onSelectPart:(id:string)=>void; asmQty:number }) {
   const dynamicIssues: typeof DFM_ISSUES = [];
   parts.forEach(p=>{
     if (!p.included||p.stocked||!p.stock) return;
@@ -534,7 +612,7 @@ function DfmPanel({ parts, onSelectPart, asmQty }: { parts:Part[]; onSelectPart:
       )}
     </div>
   );
-}
+});
 
 /* ===========================================================
    Lead time bar
@@ -744,6 +822,96 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
 }
 
 /* ===========================================================
+   Cost panel (memoized — doesn't depend on selection)
+   =========================================================== */
+
+const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
+  parts: Part[]; asmQty: number; commercial: { marginPct: number; taxPct: number };
+}) {
+  const r = rollup(parts, asmQty, commercial);
+
+  const cat = { material: 0, machine: 0, setup: 0, finish: 0 };
+  parts.forEach(p => {
+    if (!p.included) return;
+    const qty = partQty(p, asmQty);
+    cat.material += partMaterialCost(p, asmQty);
+    cat.finish += partFinishCost(p, asmQty);
+    (p.operations || []).forEach(op => {
+      const rate = MACHINES[op.machine]?.rate ?? 0;
+      cat.setup += (op.setupMin / 60) * rate;
+      cat.machine += (op.cycleMin / 60) * rate * qty;
+    });
+  });
+
+  const machineBreakdown: Record<string, { cost: number; mins: number }> = {};
+  parts.forEach(p => {
+    if (!p.included) return;
+    const qty = partQty(p, asmQty);
+    (p.operations || []).forEach(op => {
+      const rate = MACHINES[op.machine]?.rate ?? 0;
+      const cost = (op.setupMin / 60) * rate + (op.cycleMin / 60) * rate * qty;
+      const mins = op.setupMin + op.cycleMin * qty;
+      machineBreakdown[op.machine] = machineBreakdown[op.machine] || { cost: 0, mins: 0 };
+      machineBreakdown[op.machine].cost += cost;
+      machineBreakdown[op.machine].mins += mins;
+    });
+  });
+  const machineRows = Object.entries(machineBreakdown).sort((a, b) => b[1].cost - a[1].cost);
+
+  const segs = [
+    { k: "Material",   v: cat.material, c: "#5d80c9" },
+    { k: "Machining",  v: cat.machine,  c: "#7b95c0" },
+    { k: "Setup",      v: cat.setup,    c: "#9aabc7" },
+    { k: "Finishing",  v: cat.finish,   c: "#c9b48f" },
+    { k: "Tooling",    v: r.tooling,    c: "#c7c2b4" },
+    { k: "Inspection", v: r.inspection, c: "#9fb6a4" },
+    { k: "Margin",     v: r.margin,     c: "#5fa05f" },
+  ];
+  const segsTotal = segs.reduce((a, s) => a + s.v, 0) || 1;
+
+  return (
+    <div className="panel cost-panel">
+      <div className="panel-head">
+        <span className="title">Cost breakdown</span>
+        <span className="sub">Subtotal {fmtINR(r.subtotal)} · Margin {fmtINR(r.margin)}</span>
+        <div className="right">
+          <button className="btn sm ghost"><Copy size={12}/> Duplicate</button>
+          <button className="btn sm ghost"><Settings2 size={12}/> Rate card</button>
+        </div>
+      </div>
+      <div className="margin-bar">{segs.map(s => <span key={s.k} style={{width:`${(s.v/segsTotal)*100}%`,background:s.c}}/>)}</div>
+      <div className="margin-legend">{segs.map(s => <span key={s.k}><span className="dot" style={{background:s.c}}/>{s.k}<span className="v">{fmtINR(s.v)}</span></span>)}</div>
+      <div className="cost-grid">
+        <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtINR(r.partsCost)}</span></div>
+        <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
+        <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
+        <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
+        <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtINR(r.subtotal)}</span></div>
+        <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtINR(r.total)}</span></div>
+      </div>
+      {machineRows.length > 0 && (
+        <>
+          <div style={{padding:"10px 14px 4px",borderTop:"1px solid var(--divider)"}}><div className="eyebrow">Machine utilization</div></div>
+          <div style={{padding:"0 14px 16px"}}>
+            {machineRows.map(([m, info]) => {
+              const pct = r.partsCost > 0 ? (info.cost / r.partsCost) * 100 : 0;
+              return (
+                <div key={m} style={{display:"grid",gridTemplateColumns:"120px 1fr 80px 80px",alignItems:"center",gap:10,padding:"6px 0",fontSize:12}}>
+                  <span style={{color:"var(--text-2)"}}>{MACHINES[m]?.label || m}</span>
+                  <div style={{height:6,background:"var(--panel-3)",borderRadius:99,overflow:"hidden"}}><div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:"var(--accent)"}}/></div>
+                  <span className="mono muted" style={{textAlign:"right",fontSize:11}}>{fmtMin(info.mins)} min</span>
+                  <span className="mono" style={{textAlign:"right",fontSize:12}}>{fmtINR(info.cost)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+
+/* ===========================================================
    Quote workspace
    =========================================================== */
 
@@ -772,11 +940,7 @@ function ConfirmReplaceModal({ existingCount, incomingCount, fileName, onReplace
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
   const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial } = useQuoteState();
-  const cadName = cad?.fileName?.replace(/\.[^.]+$/, "") ?? "";
-  const bbox = cad?.geometry?.boundingBoxMm;
-  const previewSub = cad
-    ? `${cad.fileName}${bbox ? ` · ${bbox.x.toFixed(1)} × ${bbox.y.toFixed(1)} × ${bbox.z.toFixed(1)} mm` : ""}`
-    : `${parts.length} ${parts.length === 1 ? "body" : "bodies"}`;
+  const [showAll, setShowAll] = useState(false);
   const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
 
   useEffect(() => {
@@ -790,110 +954,60 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
     }
   }, [pendingHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const r=rollup(parts,asmQty,commercial);
-  const lead=computeLeadTime(parts,asmQty);
-
-  const cat={material:0,machine:0,setup:0,finish:0};
-  parts.forEach(p=>{
-    if (!p.included) return;
-    const qty=partQty(p,asmQty);
-    cat.material+=partMaterialCost(p,asmQty);
-    cat.finish+=partFinishCost(p,asmQty);
-    (p.operations||[]).forEach(op=>{
-      const rate=MACHINES[op.machine]?.rate??0;
-      cat.setup+=(op.setupMin/60)*rate;
-      cat.machine+=(op.cycleMin/60)*rate*qty;
-    });
-  });
-
-  const machineBreakdown: Record<string,{cost:number;mins:number}>={};
-  parts.forEach(p=>{
-    if (!p.included) return;
-    const qty=partQty(p,asmQty);
-    (p.operations||[]).forEach(op=>{
-      const rate=MACHINES[op.machine]?.rate??0, cost=(op.setupMin/60)*rate+(op.cycleMin/60)*rate*qty, mins=op.setupMin+op.cycleMin*qty;
-      machineBreakdown[op.machine]=machineBreakdown[op.machine]||{cost:0,mins:0};
-      machineBreakdown[op.machine].cost+=cost;
-      machineBreakdown[op.machine].mins+=mins;
-    });
-  });
-  const machineRows=Object.entries(machineBreakdown).sort((a,b)=>b[1].cost-a[1].cost);
-
-  const segs=[
-    {k:"Material",   v:cat.material,    c:"#5d80c9"},
-    {k:"Machining",  v:cat.machine,     c:"#7b95c0"},
-    {k:"Setup",      v:cat.setup,       c:"#9aabc7"},
-    {k:"Finishing",  v:cat.finish,      c:"#c9b48f"},
-    {k:"Tooling",    v:r.tooling,       c:"#c7c2b4"},
-    {k:"Inspection", v:r.inspection,    c:"#9fb6a4"},
-    {k:"Margin",     v:r.margin,        c:"#5fa05f"},
-  ];
-  const segsTotal=segs.reduce((a,s)=>a+s.v,0)||1;
-  const totalMachineMin=parts.filter(p=>p.included).reduce((a,p)=>a+(p.operations||[]).reduce((b,op)=>b+opMinutes(op,partQty(p,asmQty)),0),0);
+  // Defer the right-rail selection so the row highlight + 3D body update commit
+  // immediately; the heavy StockEditor/OperationsEditor remount happens in a
+  // follow-up render and never blocks the click.
+  const deferredSelectedId = useDeferredValue(selectedId);
 
   return (
     <>
     <div className="quote-grid">
-      <div className="panel preview-panel">
-        <div className="panel-head">
-          <span className="title">Part preview</span>
-          <span className="sub">{previewSub}</span>
-          <div className="right">
-            <span className="chip warning"><span className="dot"/>{DFM_ISSUES.length} DFM issues</span>
-            <button className="btn sm ghost" onClick={onOpenViewer}><ExternalLink size={12}/> Open in viewer</button>
+      <div className="right-col">
+        <div className="panel preview-panel">
+          <div className="panel-head">
+            <span className="title">Preview</span>
+            <div className="right" style={{ gap: 6 }}>
+              {cad && (
+                <button
+                  onClick={() => setShowAll(v => !v)}
+                  title={showAll ? "Show only the selected part" : "Show the full assembly"}
+                  style={{
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    borderRadius: 5,
+                    border: "1px solid var(--accent)",
+                    background: showAll ? "var(--accent)" : "var(--panel-1)",
+                    color: showAll ? "#fff" : "var(--accent)",
+                  }}
+                >
+                  {showAll ? <><Square size={11}/> Isolate</> : <><Boxes size={11}/> Full assembly</>}
+                </button>
+              )}
+              <button className="btn sm ghost" onClick={onOpenViewer} title="Open in full viewer"><ExternalLink size={12}/></button>
+            </div>
           </div>
+          {cad
+            ? <QuoteCadPreview
+                model={cad}
+                selectedId={selectedId}
+                selectedMeshIds={(() => {
+                  const p = parts.find(p => p.id === selectedId);
+                  return p?.meshIds ?? (selectedId ? [selectedId] : []);
+                })()}
+                showAll={showAll}/>
+            : <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId}/>}
         </div>
-        <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId} title={cadName}/>
-        <div className="metric-strip">
-          <div><div className="label"><BoxesIcon size={12}/> Bodies</div><div className="value">{parts.filter(p=>p.included).length}<span className="muted" style={{fontSize:11}}> / {parts.length}</span></div></div>
-          <div><div className="label"><Scale size={12}/> Total mass</div><div className="value">{parts.filter(p=>p.included).reduce((a,p)=>a+p.mass*partQty(p,asmQty),0).toFixed(2)} <span className="muted" style={{fontSize:11}}>kg</span></div></div>
-          <div><div className="label"><Clock size={12}/> Machine time</div><div className="value">{fmtMin(totalMachineMin)} <span className="muted" style={{fontSize:11}}>min</span></div></div>
-          <div><div className="label"><Truck size={12}/> Ship</div><div className="value" style={{fontSize:13}}>{fmtShipDate(lead.shipDate)}</div></div>
-        </div>
+        <RfqRail parts={parts} setParts={setParts} asmQty={asmQty} setAsmQty={setAsmQty} selectedId={deferredSelectedId} commercial={commercial} setCommercial={setCommercial}/>
       </div>
-
-      <RfqRail parts={parts} setParts={setParts} asmQty={asmQty} setAsmQty={setAsmQty} selectedId={selectedId} commercial={commercial} setCommercial={setCommercial}/>
       <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} searchQuery={searchQuery}/>
       <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty}/>
 
-      <div className="panel cost-panel">
-        <div className="panel-head">
-          <span className="title">Cost breakdown</span>
-          <span className="sub">Subtotal {fmtINR(r.subtotal)} · Margin {fmtINR(r.margin)}</span>
-          <div className="right">
-            <button className="btn sm ghost"><Copy size={12}/> Duplicate</button>
-            <button className="btn sm ghost"><Settings2 size={12}/> Rate card</button>
-          </div>
-        </div>
-        <div className="margin-bar">{segs.map(s=><span key={s.k} style={{width:`${(s.v/segsTotal)*100}%`,background:s.c}}/>)}</div>
-        <div className="margin-legend">{segs.map(s=><span key={s.k}><span className="dot" style={{background:s.c}}/>{s.k}<span className="v">{fmtINR(s.v)}</span></span>)}</div>
-        <div className="cost-grid">
-          <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtINR(r.partsCost)}</span></div>
-          <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
-          <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
-          <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
-          <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtINR(r.subtotal)}</span></div>
-          <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtINR(r.total)}</span></div>
-        </div>
-        {machineRows.length>0&&(
-          <>
-            <div style={{padding:"10px 14px 4px",borderTop:"1px solid var(--divider)"}}><div className="eyebrow">Machine utilization</div></div>
-            <div style={{padding:"0 14px 16px"}}>
-              {machineRows.map(([m,info])=>{
-                const pct=r.partsCost>0?(info.cost/r.partsCost)*100:0;
-                return (
-                  <div key={m} style={{display:"grid",gridTemplateColumns:"120px 1fr 80px 80px",alignItems:"center",gap:10,padding:"6px 0",fontSize:12}}>
-                    <span style={{color:"var(--text-2)"}}>{MACHINES[m]?.label||m}</span>
-                    <div style={{height:6,background:"var(--panel-3)",borderRadius:99,overflow:"hidden"}}><div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:"var(--accent)"}}/></div>
-                    <span className="mono muted" style={{textAlign:"right",fontSize:11}}>{fmtMin(info.mins)} min</span>
-                    <span className="mono" style={{textAlign:"right",fontSize:12}}>{fmtINR(info.cost)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+      <CostPanel parts={parts} asmQty={asmQty} commercial={commercial}/>
     </div>
     {confirmHandoff && cad && (
       <ConfirmReplaceModal

@@ -5,4 +5,8 @@ export type Part = {
   material: string; perAssembly: number; mass: number; finishing: number; included: boolean; stocked?: boolean;
   stock: Stock | null;
   operations: Op[];
+  // All CAD mesh ids that share this part's geometry. When undefined, the
+  // part isn't backed by CAD bodies (sample data, purchased items) — treat as
+  // a single virtual body keyed by part.id.
+  meshIds?: string[];
 };
