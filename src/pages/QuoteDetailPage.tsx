@@ -19,6 +19,7 @@ import {
   BoxesIcon,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Clock,
   Cog,
@@ -29,7 +30,6 @@ import {
   Layers,
   Lightbulb,
   Minus,
-  MoreHorizontal,
   MousePointer2,
   OctagonX,
   Package,
@@ -48,38 +48,84 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
+import { getAllMaterials, getAllMachines } from "../db/queries";
 
 /* ===========================================================
-   Reference data
+   Reference data — loaded from DB (Material library / Machines & rates)
    =========================================================== */
 
-const MATERIALS: Record<string, { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number> }> = {
-  "mat-ms":  { label: "Mild Steel (MS)",   density: 7850, hex: "#8d959c", grade: "IS 2062 · Structural steel",  forms: ["rect","round","hex"], rates: { rect:75, round:80, hex:85 } },
-  "al-6061": { label: "Aluminum 6061-T6",  density: 2700, hex: "#bfc7d1", grade: "T6 temper · IS 737",          forms: ["rect","round"],      rates: { rect:280, round:290 } },
-  "brass":   { label: "Brass CW614N",      density: 8500, hex: "#c69f5a", grade: "Free-machining · IS 319",     forms: ["round","hex"],       rates: { round:650, hex:680 } },
-  "ss-304":  { label: "Stainless 304",     density: 8000, hex: "#a8b0b8", grade: "Austenitic · SS 304 Grade",   forms: ["rect","round","hex"], rates: { rect:320, round:330, hex:350 } },
-  "stock":   { label: "Stock / purchased", density: 1000, hex: "#dcd9d2", grade: "Purchased · not machined",    forms: ["rect"],              rates: { rect:0 } },
-};
+type MaterialMeta = { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number>; isPurchased: boolean };
+type MachineMeta  = { label: string; rate: number; short: string };
 
-const MACHINES: Record<string, { label: string; rate: number; short: string }> = {
-  "mill-3ax": { label: "Mill · 3-axis",  rate: 1500, short: "Mill 3-ax" },
-  "mill-5ax": { label: "Mill · 5-axis",  rate: 3500, short: "Mill 5-ax" },
-  "lathe":    { label: "Lathe",          rate: 1200, short: "Lathe" },
-  "drill":    { label: "Drill press",    rate: 800,  short: "Drill" },
-  "tap":      { label: "Tap / thread",   rate: 800,  short: "Tap" },
-  "wire-edm": { label: "Wire EDM",       rate: 2200, short: "Wire EDM" },
-  "grind":    { label: "Surface grind",  rate: 1600, short: "Grind" },
-  "deburr":   { label: "Deburr / hand",  rate: 600,  short: "Deburr" },
-  "inspect":  { label: "CMM inspect",    rate: 1400, short: "CMM" },
-};
+// Mutable maps populated from the DB at app start. Cost utilities read from these.
+const MATERIALS: Record<string, MaterialMeta> = {};
+const MACHINES:  Record<string, MachineMeta>  = {};
+
+const MATERIAL_PALETTE = ["#8d959c", "#bfc7d1", "#c69f5a", "#a8b0b8", "#dcd9d2", "#7d92aa", "#a89b7a", "#a3b5a8"];
+function colorForMaterial(id: string): string {
+  let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return MATERIAL_PALETTE[Math.abs(h) % MATERIAL_PALETTE.length];
+}
+
+// Pub-sub so React components can re-render when the catalog finishes loading.
+const catalogListeners = new Set<() => void>();
+let catalogVersion = 0;
+function notifyCatalog() { catalogVersion++; catalogListeners.forEach(l => l()); }
+
+function useCatalogVersion() {
+  const [, setV] = useState(0);
+  useEffect(() => {
+    const l = () => setV(v => v + 1);
+    catalogListeners.add(l);
+    return () => { catalogListeners.delete(l); };
+  }, []);
+  return catalogVersion;
+}
+
+let catalogInflight: Promise<void> | null = null;
+async function loadCatalog(): Promise<void> {
+  if (catalogInflight) return catalogInflight;
+  catalogInflight = (async () => {
+    const [mats, machs] = await Promise.all([getAllMaterials(true), getAllMachines(true)]);
+    for (const k of Object.keys(MATERIALS)) delete MATERIALS[k];
+    for (const k of Object.keys(MACHINES))  delete MACHINES[k];
+    for (const m of mats) {
+      MATERIALS[m.id] = {
+        label: m.name,
+        density: m.densityKgPerM3,
+        hex: colorForMaterial(m.id),
+        grade: m.category || "",
+        forms: m.availableForms || [],
+        rates: m.formRates || {},
+        isPurchased: (m.category || "").toLowerCase() === "purchased",
+      };
+    }
+    for (const m of machs) {
+      MACHINES[m.id] = { label: m.name, rate: m.ratePerHour, short: m.shortName };
+    }
+    notifyCatalog();
+  })().finally(() => { catalogInflight = null; });
+  return catalogInflight;
+}
 
 const SHAPES: Record<string, { label: string; dims: string[] }> = {
-  "plate":      { label: "Plate",      dims: ["L","W","H"] },
-  "block":      { label: "Block",      dims: ["L","W","H"] },
-  "round-bar":  { label: "Round bar",  dims: ["D","L"] },
-  "square-bar": { label: "Square bar", dims: ["side","L"] },
-  "tube":       { label: "Tube",       dims: ["OD","ID","L"] },
+  "rect":  { label: "Rect",  dims: ["L","W","H"] },
+  "round": { label: "Round", dims: ["D","L","ID"] },
+  "hex":   { label: "Hex",   dims: ["AF","L"] },
 };
+
+// Migrate legacy shape keys (block/plate/round-bar/square-bar/tube) to the new 3-shape model.
+function normalizeStock(stock: Stock | null): Stock | null {
+  if (!stock) return null;
+  const s = stock.shape;
+  if (s === "rect" || s === "round" || s === "hex") return stock;
+  const d = stock.dims || {};
+  if (s === "plate" || s === "block") return { shape: "rect",  dims: { L: d.L ?? 80, W: d.W ?? 50, H: d.H ?? 25 } };
+  if (s === "round-bar")               return { shape: "round", dims: { D: d.D ?? 30, L: d.L ?? 80, ID: 0 } };
+  if (s === "tube")                    return { shape: "round", dims: { D: d.OD ?? 30, L: d.L ?? 80, ID: d.ID ?? 0 } };
+  if (s === "square-bar")              return { shape: "hex",   dims: { AF: d.side ?? 24, L: d.L ?? 80 } };
+  return { shape: "rect", dims: { L: 80, W: 50, H: 25 } };
+}
 
 let __opSeq = 100;
 const opId = () => `op-${++__opSeq}`;
@@ -101,21 +147,24 @@ const DFM_ISSUES = [
 function stockVolumeMm3(stock: Stock): number {
   const { shape, dims } = stock;
   switch (shape) {
-    case "plate": case "block": return (dims.L||0)*(dims.W||0)*(dims.H||0);
-    case "round-bar": return Math.PI*Math.pow((dims.D||0)/2,2)*(dims.L||0);
-    case "square-bar": return Math.pow(dims.side||0,2)*(dims.L||0);
-    case "tube": { const ro=(dims.OD||0)/2, ri=(dims.ID||0)/2; return Math.PI*(ro*ro-ri*ri)*(dims.L||0); }
+    case "rect": return (dims.L||0)*(dims.W||0)*(dims.H||0);
+    case "round": { const ro=(dims.D||0)/2, ri=(dims.ID||0)/2; return Math.PI*(ro*ro-ri*ri)*(dims.L||0); }
+    case "hex": return (Math.sqrt(3)/2)*Math.pow(dims.AF||0,2)*(dims.L||0);
     default: return 0;
   }
 }
 
-const SHAPE_TO_FORM: Record<string, string> = { block:"rect", cylinder:"round", "hex-bar":"hex", tube:"round" };
 function getMaterialRate(materialId: string, stockShape?: string): number {
   const mat = MATERIALS[materialId];
   if (!mat) return 0;
-  const form = stockShape ? SHAPE_TO_FORM[stockShape] : undefined;
-  if (form && mat.rates[form] !== undefined) return mat.rates[form];
+  if (stockShape && mat.rates[stockShape] !== undefined) return mat.rates[stockShape];
   return Object.values(mat.rates)[0] ?? 0;
+}
+
+// Effective per-kg rate for a part: per-quote override wins, otherwise falls back to the material library.
+function partRate(p: Part): number {
+  if (p.materialRateOverride != null && !isNaN(p.materialRateOverride)) return p.materialRateOverride;
+  return getMaterialRate(p.material, p.stock?.shape);
 }
 
 function stockMassKg(stock: Stock|null, materialId: string): number {
@@ -123,16 +172,28 @@ function stockMassKg(stock: Stock|null, materialId: string): number {
   return stockVolumeMm3(stock)*1e-9*(MATERIALS[materialId]?.density??0);
 }
 
+// Net (machined) part mass — derived from CAD volume × current material density.
+// Falls back to a stored `mass` value if no geometry is available (e.g. manually added parts).
+function partNetMassKg(p: Part): number {
+  if (p.netVolumeMm3 != null) return p.netVolumeMm3 * 1e-9 * (MATERIALS[p.material]?.density ?? 0);
+  return p.mass || 0;
+}
+
 function stockUtilization(p: Part): number|null {
   if (!p.stock||p.stocked) return null;
   const sm = stockMassKg(p.stock, p.material);
-  return sm>0 ? p.mass/sm : null;
+  const nm = partNetMassKg(p);
+  return sm>0 ? nm/sm : null;
 }
 
 const partQty = (p: Part, asmQty: number) => p.perAssembly*asmQty;
 
+function opRate(op: Op): number {
+  if (op.rateOverride != null && !isNaN(op.rateOverride)) return op.rateOverride;
+  return MACHINES[op.machine]?.rate ?? 0;
+}
 function opCost(op: Op, qty: number): number {
-  const rate = MACHINES[op.machine]?.rate??0;
+  const rate = opRate(op);
   return (op.setupMin/60)*rate+(op.cycleMin/60)*rate*qty;
 }
 function opMinutes(op: Op, qty: number): number { return op.setupMin+op.cycleMin*qty; }
@@ -142,8 +203,8 @@ function partMachineCost(p: Part, asmQty: number): number {
   return (p.operations||[]).reduce((a,op)=>a+opCost(op,qty),0);
 }
 function partMaterialCost(p: Part, asmQty: number): number {
-  const matRate = getMaterialRate(p.material, p.stock?.shape);
-  const mass = (p.stocked||!p.stock)?p.mass:stockMassKg(p.stock,p.material);
+  const matRate = partRate(p);
+  const mass = (p.stocked||!p.stock) ? partNetMassKg(p) : stockMassKg(p.stock, p.material);
   return mass*matRate*partQty(p,asmQty);
 }
 function partFinishCost(p: Part, asmQty: number): number { return p.finishing*partQty(p,asmQty); }
@@ -165,6 +226,17 @@ function fmtINR(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFract
 function fmtINR0(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:0}); }
 function fmtMin(n: number) { return n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:1}); }
 function fmtPct(n: number) { return (n>=0?"+":"")+n.toFixed(1)+"%"; }
+
+function fmtStockDims(stock: Stock): string {
+  const d = stock.dims || {};
+  const r = (n: number) => Math.round(n).toString();
+  switch (stock.shape) {
+    case "rect":  return `${r(d.L||0)}×${r(d.W||0)}×${r(d.H||0)} mm`;
+    case "round": return d.ID ? `⌀${r(d.D||0)}×${r(d.L||0)} mm · ID ${r(d.ID)}` : `⌀${r(d.D||0)}×${r(d.L||0)} mm`;
+    case "hex":   return `AF ${r(d.AF||0)}×${r(d.L||0)} mm`;
+    default: return "";
+  }
+}
 
 function addBusinessDays(start: Date, n: number): Date {
   const d = new Date(start); let added = 0;
@@ -188,11 +260,9 @@ function computeLeadTime(parts: Part[], asmQty: number) {
 function ShapeIcon({ shape, size=14 }: { shape:string; size?:number }) {
   const s=size, sw=1.25, stroke="currentColor";
   switch (shape) {
-    case "plate":      return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="2" y="6.5" width="12" height="3" rx="0.5" stroke={stroke} strokeWidth={sw}/></svg>;
-    case "block":      return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="3" y="4" width="10" height="8" rx="0.5" stroke={stroke} strokeWidth={sw}/><line x1="3" y1="6" x2="13" y2="6" stroke={stroke} strokeWidth={sw} opacity="0.5"/></svg>;
-    case "round-bar":  return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="2" y="6" width="12" height="4" rx="2" stroke={stroke} strokeWidth={sw}/></svg>;
-    case "square-bar": return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="2" y="6" width="12" height="4" stroke={stroke} strokeWidth={sw}/></svg>;
-    case "tube":       return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="2" y="5" width="12" height="6" rx="3" stroke={stroke} strokeWidth={sw}/><rect x="4" y="6.5" width="8" height="3" rx="1.5" stroke={stroke} strokeWidth={sw} opacity="0.55"/></svg>;
+    case "rect":  return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="3" y="4" width="10" height="8" rx="0.5" stroke={stroke} strokeWidth={sw}/><line x1="3" y1="6" x2="13" y2="6" stroke={stroke} strokeWidth={sw} opacity="0.5"/></svg>;
+    case "round": return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><rect x="2" y="5" width="12" height="6" rx="3" stroke={stroke} strokeWidth={sw}/></svg>;
+    case "hex":   return <svg width={s} height={s} viewBox="0 0 16 16" fill="none"><polygon points="4,4 12,4 14.5,8 12,12 4,12 1.5,8" stroke={stroke} strokeWidth={sw} strokeLinejoin="round"/></svg>;
     default: return null;
   }
 }
@@ -294,40 +364,169 @@ function QuoteCadPreview({ model, selectedId, selectedMeshIds, showAll }: {
    Operations editor
    =========================================================== */
 
+function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(patch:Partial<Part>)=>void }) {
+  const stock = normalizeStock(part.stock) || { shape: "rect", dims: { L: 80, W: 50, H: 25 } };
+  const cfg = SHAPES[stock.shape] || SHAPES.rect;
+  const rate = partRate(part);
+  const sm = stockMassKg(stock, part.material);
+  const materialCost = sm * rate * qty;
+  const netMass = partNetMassKg(part);
+  const util = sm > 0 ? (netMass / sm) * 100 : 0;
+  const utilClass = util >= 50 ? "good" : util >= 25 ? "warn" : "poor";
+  const isOverride = part.materialRateOverride != null;
+
+  function updateShape(newShape: string) {
+    const newCfg = SHAPES[newShape];
+    const defaults: Record<string, number> = { L: 80, W: 50, H: 25, D: 30, ID: 0, AF: 24 };
+    const newDims: Record<string, number> = {};
+    newCfg.dims.forEach(k => { newDims[k] = stock.dims?.[k] ?? defaults[k]; });
+    // Shape changed → rates may differ per form, drop the override so the library rate kicks back in.
+    onChange({ stock: { shape: newShape, dims: newDims }, materialRateOverride: null });
+  }
+  function updateDim(k: string, v: number) {
+    onChange({ stock: { ...stock, dims: { ...stock.dims, [k]: v } } });
+  }
+  function updateMaterial(newMat: string) {
+    // Material changed → clear the per-part rate override.
+    onChange({ material: newMat, materialRateOverride: null });
+  }
+  function updateRate(v: number) {
+    onChange({ materialRateOverride: v });
+  }
+  function resetRate() {
+    onChange({ materialRateOverride: null });
+  }
+
+  return (
+    <div className="stock-panel">
+      <div className="sp-row">
+        <span className="sp-eyebrow">Material</span>
+        <select
+          className="sp-mat-select"
+          value={part.material}
+          onChange={e => updateMaterial(e.target.value)}
+        >
+          {!MATERIALS[part.material] && <option value="">Select material…</option>}
+          {Object.entries(MATERIALS).filter(([, m]) => !m.isPurchased).map(([k, m]) => (
+            <option key={k} value={k}>{m.label}</option>
+          ))}
+        </select>
+        <div className={`sp-rate-edit ${isOverride ? "override" : ""}`} title={isOverride ? "Custom rate for this quote — click ↺ to reset to library rate" : "Click to override rate for this quote"}>
+          <span className="muted">Rate ₹</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={Number.isFinite(rate) ? rate : 0}
+            onChange={e => updateRate(+e.target.value || 0)}
+          />
+          <span className="muted">/kg</span>
+          {isOverride && <button className="sp-rate-reset" onClick={resetRate} title="Reset to library rate">↺</button>}
+        </div>
+      </div>
+      <div className="sp-row">
+        <span className="sp-eyebrow">Shape</span>
+        <div className="sp-shape-chips">
+          {Object.entries(SHAPES).map(([k, s]) => (
+            <button key={k} className={`sp-shape-chip ${stock.shape === k ? "on" : ""}`} onClick={() => updateShape(k)}>
+              <span className="shape-ic"><ShapeIcon shape={k} size={12} /></span>
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <span className={`util-pill ${utilClass}`}><Percent size={10} /> {util.toFixed(0)}% util</span>
+      </div>
+      <div className={`sp-dims dims-${cfg.dims.length}`}>
+        {cfg.dims.map(k => (
+          <div className="sp-field" key={k}>
+            <label>{k}</label>
+            <div className="suffix">
+              <input type="number" min="0" value={stock.dims?.[k] ?? 0} onChange={e => updateDim(k, +e.target.value || 0)} />
+              <span className="unit">mm</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="sp-foot">
+        <span className="sp-summary">
+          <strong>{sm.toFixed(3)} kg</strong> stock · {netMass.toFixed(3)} kg net · {Math.max(0, sm - netMass).toFixed(3)} kg waste
+        </span>
+        <span className="sp-total">{fmtINR(materialCost)} material</span>
+      </div>
+    </div>
+  );
+}
+
 function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onChange:(patch:Partial<Part>)=>void }) {
   function update(id:string, patch:Partial<Op>) { onChange({operations:part.operations.map(op=>op.id===id?{...op,...patch}:op)}); }
   function remove(id:string) { onChange({operations:part.operations.filter(op=>op.id!==id)}); }
   function move(i:number, dir:number) { const list=part.operations.slice(); const j=i+dir; if (j<0||j>=list.length) return; [list[i],list[j]]=[list[j],list[i]]; onChange({operations:list}); }
-  function add() { onChange({operations:[...part.operations,{id:opId(),machine:"mill-3ax",setupMin:5,cycleMin:1}]}); }
+  function add() {
+    const defaultMachine = Object.keys(MACHINES)[0] ?? "";
+    onChange({operations:[...part.operations,{id:opId(),machine:defaultMachine,setupMin:5,cycleMin:1}]});
+  }
   const totalMin=part.operations.reduce((a,op)=>a+opMinutes(op,qty),0);
   const totalCost=partMachineCost(part,qty/(part.perAssembly||1));
   return (
-    <div className="ops-table" style={{marginTop:6}}>
-      <div className="row head"><span/><span>Operation · machine</span><span className="num">Setup</span><span className="num">Cycle</span><span className="num">Cost</span><span/></div>
-      {part.operations.length===0&&<div className="row" style={{color:"var(--text-3)",padding:"10px 12px"}}><span/><span style={{gridColumn:"2/-1"}}>No operations — add one to start estimating.</span></div>}
-      {part.operations.map((op,i)=>(
-        <div className="row" key={op.id}>
-          <span className="idx-wrap">
-            <span className="reorder">
-              <button onClick={()=>move(i,-1)} disabled={i===0}><ChevronUp size={9}/></button>
-              <button onClick={()=>move(i,+1)} disabled={i===part.operations.length-1}><ChevronDown size={9}/></button>
+    <div className="ops-panel">
+      <div className="op-head">
+        <span className="op-col-idx">#</span>
+        <span className="op-col-machine">Operation · machine</span>
+        <span className="op-col-spacer" />
+        <span className="op-col-rate">Rate</span>
+        <span className="op-col-setup">Setup</span>
+        <span className="op-col-cycle">Cycle</span>
+        <span className="op-col-cost">Cost</span>
+        <span className="op-col-x" />
+      </div>
+      {part.operations.length === 0 && (
+        <div className="op-empty">No operations — add one to start estimating.</div>
+      )}
+      {part.operations.map((op, i) => {
+        const rate = opRate(op);
+        const isRateOverride = op.rateOverride != null;
+        return (
+          <div className="op-row" key={op.id}>
+            <span className="op-col-idx">
+              <span className="op-reorder">
+                <button onClick={() => move(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={10} /></button>
+                <button onClick={() => move(i, +1)} disabled={i === part.operations.length - 1} title="Move down"><ChevronDown size={10} /></button>
+              </span>
+              <span className="op-idx">{i + 1}</span>
             </span>
-            <span className="idx">{(i+1)*10}</span>
-          </span>
-          <div className="machine-cell">
-            <select value={op.machine} onChange={e=>update(op.id,{machine:e.target.value})}>
-              {Object.entries(MACHINES).map(([k,v])=><option key={k} value={k}>{v.label} · ₹{v.rate}/h</option>)}
-            </select>
+            <div className="op-col-machine">
+              <select value={op.machine} onChange={e => update(op.id, { machine: e.target.value, rateOverride: null })}>
+                {Object.entries(MACHINES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <span className="op-col-spacer" />
+            <div className="op-col-rate">
+              <div className={`op-num-input ${isRateOverride ? "override" : ""}`} title={isRateOverride ? "Custom rate for this quote — click ↺ to reset" : "Click to override rate for this quote"}>
+                <input type="number" min="0" step="1" value={rate} onChange={e => update(op.id, { rateOverride: +e.target.value || 0 })} />
+                <span className="unit">/h</span>
+                {isRateOverride && <button className="op-rate-reset" onClick={() => update(op.id, { rateOverride: null })} title="Reset to library rate">↺</button>}
+              </div>
+            </div>
+            <div className="op-col-setup">
+              <div className="op-num-input">
+                <input type="number" min="0" step="0.5" value={op.setupMin} onChange={e => update(op.id, { setupMin: +e.target.value || 0 })} />
+                <span className="unit">min</span>
+              </div>
+            </div>
+            <div className="op-col-cycle">
+              <div className="op-num-input">
+                <input type="number" min="0" step="0.1" value={op.cycleMin} onChange={e => update(op.id, { cycleMin: +e.target.value || 0 })} />
+                <span className="unit">min</span>
+              </div>
+            </div>
+            <span className="op-col-cost">{fmtINR(opCost(op, qty))}</span>
+            <button className="op-col-x op-remove" onClick={() => remove(op.id)} title="Remove operation"><X size={12} /></button>
           </div>
-          <input type="number" className="mono" value={op.setupMin} min="0" step="0.5" onChange={e=>update(op.id,{setupMin:+e.target.value||0})}/>
-          <input type="number" className="mono" value={op.cycleMin} min="0" step="0.1" onChange={e=>update(op.id,{cycleMin:+e.target.value||0})}/>
-          <span className="num" style={{paddingRight:4}}>{fmtINR(opCost(op,qty))}</span>
-          <button className="remove-op" onClick={()=>remove(op.id)}><X size={12}/></button>
-        </div>
-      ))}
-      <div className="ops-foot">
-        <button className="add-op-btn" onClick={add}><Plus size={12}/> Add operation</button>
-        <div className="summary"><strong>{fmtMin(totalMin)} min</strong> · {fmtINR(totalCost)} machining</div>
+        );
+      })}
+      <div className="op-foot">
+        <button className="op-add-btn" onClick={add}><Plus size={12} /> Add operation</button>
+        <span className="op-summary"><strong>{fmtMin(totalMin)} min</strong> · {fmtINR(totalCost)} machining</span>
       </div>
     </div>
   );
@@ -339,19 +538,20 @@ function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onCh
 
 function StockEditor({ part, onChange }: { part:Part; onChange:(patch:Partial<Part>)=>void }) {
   if (!part||part.stocked) return null;
-  const stock=part.stock||{shape:"block",dims:{L:50,W:50,H:20}};
-  const cfg=SHAPES[stock.shape]||SHAPES.block;
+  const stock=normalizeStock(part.stock)||{shape:"rect",dims:{L:80,W:50,H:25}};
+  const cfg=SHAPES[stock.shape]||SHAPES.rect;
   function updateShape(newShape:string) {
     const newCfg=SHAPES[newShape];
-    const defaults:Record<string,number>={L:80,W:50,H:25,D:30,side:30,OD:30,ID:20};
+    const defaults:Record<string,number>={L:80,W:50,H:25,D:30,ID:0,AF:24};
     const newDims:Record<string,number>={};
     newCfg.dims.forEach(k=>{ newDims[k]=stock.dims?.[k]??defaults[k]; });
     onChange({stock:{shape:newShape,dims:newDims}});
   }
   function updateDim(key:string, val:number) { onChange({stock:{...stock,dims:{...stock.dims,[key]:val}}}); }
   const sm=stockMassKg(stock,part.material);
-  const util=sm>0?(part.mass/sm)*100:0;
-  const waste=Math.max(0,sm-part.mass);
+  const netMass=partNetMassKg(part);
+  const util=sm>0?(netMass/sm)*100:0;
+  const waste=Math.max(0,sm-netMass);
   const utilClass=util>=50?"good":util>=25?"warn":"poor";
   return (
     <div className="stock-block">
@@ -380,7 +580,7 @@ function StockEditor({ part, onChange }: { part:Part; onChange:(patch:Partial<Pa
       </div>
       <div className="stock-summary">
         <div className="cell"><span className="lbl">Stock mass</span><span className="val">{sm.toFixed(3)} kg</span></div>
-        <div className="cell center"><span className="lbl">Net part</span><span className="val">{part.mass.toFixed(3)} kg</span></div>
+        <div className="cell center"><span className="lbl">Net part</span><span className="val">{netMass.toFixed(3)} kg</span></div>
         <div className="cell right"><span className="lbl">Waste (chip)</span><span className="val">{waste.toFixed(3)} kg</span></div>
       </div>
     </div>
@@ -426,32 +626,43 @@ function MaterialCard({ materialId }: { materialId:string }) {
 type RowProps = {
   p: Part;
   isSel: boolean;
+  isExpanded: boolean;
   asmQty: number;
   onSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<Part>) => void;
+  onToggleExpanded: (id: string) => void;
 };
 
-const PartRow = memo(function PartRow({ p, isSel, asmQty, onSelect, onUpdate }: RowProps) {
+const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, onUpdate, onToggleExpanded }: RowProps) {
   const qty = partQty(p, asmQty);
   const sub = partSubtotal(p, asmQty);
   const ops = p.operations || [];
   const totalMin = ops.reduce((a, op) => a + opMinutes(op, qty), 0);
   const machineTags = ops.slice(0, 3).map(o => MACHINES[o.machine]?.short || o.machine);
   return (
-    <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""}`} onClick={() => onSelect(p.id)}>
+    <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""} ${isExpanded?"row-expanded":""}`} onClick={() => onSelect(p.id)}>
       <td className="include-cell"><input type="checkbox" checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
       <td><div className="body-cell"><span className="swatch" style={{background:p.color}}/><div style={{minWidth:0}}>
         <div className="pname">{p.name}</div>
         <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
-          {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{SHAPES[p.stock.shape]?.dims.map(k=>p.stock?.dims[k]).join("×")} mm</span>}
+          {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{fmtStockDims(p.stock)}</span>}
         </div>
       </div></div></td>
-      <td><select value={p.material} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{material:e.target.value})}>{Object.entries(MATERIALS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></td>
+      <td>{(() => { const m = MATERIALS[p.material]; return m ? <span className="material-chip"><span className="swatch" style={{background:m.hex}}/>{m.label}</span> : <span className="muted" style={{fontSize:11}}>—</span>; })()}</td>
       <td className="num"><input type="number" className="qty-input" value={p.perAssembly} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{perAssembly:+e.target.value||0})}/></td>
       <td className="num muted">{qty}</td>
       <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
       <td className="num">{p.included?fmtINR(sub):"—"}</td>
-      <td><button className="more-btn" onClick={e=>e.stopPropagation()}><MoreHorizontal size={14}/></button></td>
+      <td>
+        <button
+          className="expand-toggle"
+          onClick={e=>{e.stopPropagation();onToggleExpanded(p.id);}}
+          title={isExpanded?"Hide machining operations":"Show machining operations"}
+          aria-expanded={isExpanded}
+        >
+          {isExpanded?<ChevronDown size={14}/>:<ChevronRight size={14}/>}
+        </button>
+      </td>
     </tr>
   );
 });
@@ -464,6 +675,10 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
 }) {
   const [filter, setFilter] = useState<"all"|"machined"|"purchased"|"excluded">("all");
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedId(prev => prev === id ? null : id);
+  }, []);
   const bulkRef = useRef<HTMLDivElement>(null);
   useEffect(()=>{
     function onDoc(e:MouseEvent) { if (bulkOpen&&bulkRef.current&&!bulkRef.current.contains(e.target as Node)) setBulkOpen(false); }
@@ -481,7 +696,10 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
   const stableUpdate = useCallback((id: string, patch: Partial<Part>) => {
     setPartsRef.current(partsRef.current.map(p => p.id === id ? { ...p, ...patch } : p));
   }, []);
-  const stableSelect = useCallback((id: string) => { onSelectRef.current(id); }, []);
+  const stableSelect = useCallback((id: string) => {
+    onSelectRef.current(id);
+    setExpandedId(id);
+  }, []);
 
   const counts={included:parts.filter(p=>p.included).length,machined:parts.filter(p=>!p.stocked).length,purchased:parts.filter(p=>p.stocked).length,excluded:parts.filter(p=>!p.included).length};
   const q=searchQuery.trim().toLowerCase();
@@ -520,7 +738,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
             <div className="bulk-menu">
               <div className="section">Apply to {filtered.length} visible parts</div>
               <div className="section" style={{paddingTop:0}}>Material</div>
-              {Object.entries(MATERIALS).filter(([k])=>k!=="stock").map(([k,v])=><div className="opt" key={k} onClick={()=>bulkApply({material:k})}><span className="swatch" style={{background:v.hex}}/><span>{v.label}</span></div>)}
+              {Object.entries(MATERIALS).filter(([,m])=>!m.isPurchased).map(([k,v])=><div className="opt" key={k} onClick={()=>bulkApply({material:k})}><span className="swatch" style={{background:v.hex}}/><span>{v.label}</span></div>)}
               <div className="div"/>
               <div className="opt" onClick={()=>bulkApply({included:true})}><Check size={13}/> Include all visible</div>
               <div className="opt danger" onClick={()=>bulkApply({included:false})}><X size={13}/> Exclude all visible</div>
@@ -529,27 +747,60 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
         </div>
       </div>
       <table className="parts-table">
+        <colgroup>
+          <col style={{ width: 32 }} />
+          <col />
+          <col style={{ width: 140 }} />
+          <col style={{ width: 80 }} />
+          <col style={{ width: 60 }} />
+          <col style={{ width: 200 }} />
+          <col style={{ width: 170 }} />
+          <col style={{ width: 32 }} />
+        </colgroup>
         <thead>
           <tr>
             <th className="include-cell"/>
             <th>Part</th><th>Material</th>
             <th className="num">Per asm</th><th className="num">Qty</th>
             <th>Machining</th><th className="num">Subtotal</th>
-            <th style={{width:32}}/>
+            <th/>
           </tr>
         </thead>
         <tbody>
           {filtered.length===0&&<tr><td colSpan={8}><div className="empty-state" style={{padding:"30px 18px"}}><div className="es-ic"><Search size={18}/></div><div className="es-title">No parts match the filter</div><div className="es-hint">Clear the search or pick a different filter.</div></div></td></tr>}
-          {filtered.map(p => (
-            <PartRow
-              key={p.id}
-              p={p}
-              isSel={selectedId === p.id}
-              asmQty={asmQty}
-              onSelect={stableSelect}
-              onUpdate={stableUpdate}
-            />
-          ))}
+          {filtered.flatMap(p => {
+            const isExpanded = expandedId === p.id;
+            const rows = [
+              <PartRow
+                key={p.id}
+                p={p}
+                isSel={selectedId === p.id}
+                isExpanded={isExpanded}
+                asmQty={asmQty}
+                onSelect={stableSelect}
+                onUpdate={stableUpdate}
+                onToggleExpanded={toggleExpanded}
+              />,
+            ];
+            if (isExpanded) {
+              rows.push(
+                <tr key={p.id+":ops"} className="ops-expand-row">
+                  <td colSpan={8}>
+                    <div className="ops-expand-body">
+                      {p.stocked
+                        ? <div className="ops-purchased-note"><Package size={12}/> Purchased part — no in-house machining.</div>
+                        : <>
+                            <StockPanel part={p} qty={partQty(p, asmQty)} onChange={(patch)=>stableUpdate(p.id, patch)}/>
+                            <OperationsEditor part={p} qty={partQty(p, asmQty)} onChange={(patch)=>stableUpdate(p.id, patch)}/>
+                          </>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
+            return rows;
+          })}
           <tr className="totals"><td colSpan={6} style={{color:"var(--text-3)"}}>Filtered subtotal · {filtered.length} of {parts.length} parts</td><td className="num">{fmtINR(totalAmount)}</td><td/></tr>
         </tbody>
       </table>
@@ -837,7 +1088,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
     cat.material += partMaterialCost(p, asmQty);
     cat.finish += partFinishCost(p, asmQty);
     (p.operations || []).forEach(op => {
-      const rate = MACHINES[op.machine]?.rate ?? 0;
+      const rate = opRate(op);
       cat.setup += (op.setupMin / 60) * rate;
       cat.machine += (op.cycleMin / 60) * rate * qty;
     });
@@ -848,7 +1099,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
     if (!p.included) return;
     const qty = partQty(p, asmQty);
     (p.operations || []).forEach(op => {
-      const rate = MACHINES[op.machine]?.rate ?? 0;
+      const rate = opRate(op);
       const cost = (op.setupMin / 60) * rate + (op.cycleMin / 60) * rate * qty;
       const mins = op.setupMin + op.cycleMin * qty;
       machineBreakdown[op.machine] = machineBreakdown[op.machine] || { cost: 0, mins: 0 };
@@ -942,6 +1193,18 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
   const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial } = useQuoteState();
   const [showAll, setShowAll] = useState(false);
   const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
+  useCatalogVersion();
+  useEffect(() => {
+    loadCatalog();
+    const onFocus = () => loadCatalog();
+    const onVisible = () => { if (document.visibilityState === "visible") loadCatalog(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   useEffect(() => {
     if (!pendingHandoff || !cad) return;
