@@ -1,28 +1,45 @@
 # Agent Context
 
-## Project: Manufacturing Quote App
-CAD-driven tool for generating manufacturing quotes from STEP files.
+Manufacturing Quote App: a Tauri 2 + React 19 desktop tool for importing STEP files, inspecting CAD bodies, grouping identical bodies into quote parts, and producing manufacturing quotations.
 
-## Stack
-- **Frontend**: React 19, React Router 7, Tailwind 4, Three.js (CAD)
-- **Runtime**: Tauri 2 (Rust)
-- **Storage**: Drizzle ORM (SQLite via Tauri Plugin) + localStorage fallback
+## Read Only When Needed
 
-## Core Commands
-- `npm run tauri:dev`: App dev
-- `npm run db:generate`: Schema update
-- `npm run db:studio`: DB UI
+- Domain terms/product rules: `CONTEXT.md`
+- Architecture/code boundaries: `docs/architecture.md`
+- UI/design guidance: `docs/design-system.md`
+- Agent workflow: `docs/agents/`
+- Architectural decisions: `docs/adr/`
+- Current unfinished work: `TODO.md`
 
-## State of Project
-- **CAD**: Import/Viewing is functional (`occt-import-js`).
-- **UI**: High-fidelity layout exists, but many buttons/fields are static (see `TODO.md`).
-- **Data**: Moving from `localStorage` to `Drizzle` SQL.
+Do not eagerly read every doc. Open the smallest relevant file for the task.
 
-## Rules
-- **Logic**: Use `src/utils/` for geometry/quote math.
-- **UI**: Keep components in `src/components/`, strictly typed.
-- **DB**: Sync `src/db/schema/` with Drizzle.
-- **Rust**: Only for system/window logic in `src-tauri/`.
+## Commands
 
-## Do Not Touch
-- **Explode algorithm** in `src/components/CadViewer.tsx` (the `ExplodePart` block: principal-axis detection via bbox aspect ratio, rank-based linear slots, size-scaled radial scatter, angular fan-out fallback). Tuned across mould, shaft-fixture and 2-body cases — do not refactor or "improve" without explicit request.
+- `npm run dev`: Vite-only UI dev
+- `npm run tauri:dev`: full desktop app dev
+- `npm run build`: typecheck + Vite build
+- `npm run lint`: ESLint
+- `npm run db:generate`: Drizzle migration generation
+- `npm run db:studio`: Drizzle Studio
+
+## Code Rules
+
+- Put geometry, CAD handoff, quote math, storage, and export logic in `src/utils/`.
+- Put reusable UI in `src/components/`; route screens in `src/pages/`.
+- Keep DB schema in `src/db/schema/` and query helpers in `src/db/queries/`.
+- Keep Rust in `src-tauri/` limited to shell, OS, window, and plugin concerns.
+- Prefer existing React/CSS patterns before adding abstractions.
+
+## Protected Code
+
+Do not touch the explode algorithm in `src/components/CadViewer.tsx` without explicit user approval.
+
+This includes the `ExplodePart` block covering principal-axis detection, rank-based linear slots, size-scaled radial scatter, and angular fan-out fallback.
+
+## Design Short Version
+
+Operational quoting workstation, not a marketing site. Keep UI dense, calm, document-grade, and consistent with `src/styles/index.css`. Use lucide icons where available. Avoid decorative gradients/orbs and nested cards.
+
+## Verification
+
+Run the narrowest meaningful check for code changes. For common changes, prefer `npm run build` and/or `npm run lint`. If a check cannot run, say so.

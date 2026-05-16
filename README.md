@@ -165,6 +165,14 @@ From `AGENTS.MD`:
 - Rust (`src-tauri/`) is for OS/window concerns only. No business logic there.
 - The CAD explode block in `CadViewer.tsx` is tuned across mould, shaft, and 2-body cases — **do not refactor it without an explicit request.**
 
+For deeper project context, see:
+
+- [`CONTEXT.md`](CONTEXT.md) for domain vocabulary and product rules.
+- [`docs/architecture.md`](docs/architecture.md) for code boundaries and main flows.
+- [`docs/design-system.md`](docs/design-system.md) for UI/design guidance.
+- [`docs/agents/`](docs/agents/) for issue-tracker, triage, and agent workflow setup.
+- [`docs/adr/`](docs/adr/) for architectural decisions.
+
 ---
 
 ## Status & TODOs
