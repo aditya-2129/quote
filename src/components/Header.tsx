@@ -1,9 +1,23 @@
 import { useState, useEffect } from "react";
-import { Search, Bell, Maximize2, Minus, X, Command } from "lucide-react";
+import { Search, Bell, Minimize2, Maximize2, Minus, X, Command } from "lucide-react";
 import { KbdOverlay } from "./KbdOverlay";
 
 export function Header() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    async function check() {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const maximized = await getCurrentWindow().isMaximized();
+        setIsMaximized(maximized);
+      } catch { /* browser */ }
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -23,6 +37,7 @@ export function Header() {
   };
 
   const handleMaximize = async () => {
+    setIsMaximized(prev => !prev);
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().toggleMaximize();
@@ -67,7 +82,7 @@ export function Header() {
 
         <div className="win-controls">
           <button className="win-btn" onClick={handleMinimize}><Minus size={14} /></button>
-          <button className="win-btn" onClick={handleMaximize}><Maximize2 size={14} /></button>
+          <button className="win-btn" onClick={handleMaximize}>{isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
           <button className="win-btn close" onClick={handleClose}><X size={14} /></button>
         </div>
       </header>

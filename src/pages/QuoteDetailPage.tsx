@@ -1,7 +1,6 @@
 import {
   memo,
   useCallback,
-  useDeferredValue,
   useState,
   useEffect,
   useMemo,
@@ -30,7 +29,6 @@ import {
   Layers,
   Lightbulb,
   Minus,
-  MousePointer2,
   OctagonX,
   Package,
   Percent,
@@ -536,89 +534,6 @@ function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onCh
    Stock editor
    =========================================================== */
 
-function StockEditor({ part, onChange }: { part:Part; onChange:(patch:Partial<Part>)=>void }) {
-  if (!part||part.stocked) return null;
-  const stock=normalizeStock(part.stock)||{shape:"rect",dims:{L:80,W:50,H:25}};
-  const cfg=SHAPES[stock.shape]||SHAPES.rect;
-  function updateShape(newShape:string) {
-    const newCfg=SHAPES[newShape];
-    const defaults:Record<string,number>={L:80,W:50,H:25,D:30,ID:0,AF:24};
-    const newDims:Record<string,number>={};
-    newCfg.dims.forEach(k=>{ newDims[k]=stock.dims?.[k]??defaults[k]; });
-    onChange({stock:{shape:newShape,dims:newDims}});
-  }
-  function updateDim(key:string, val:number) { onChange({stock:{...stock,dims:{...stock.dims,[key]:val}}}); }
-  const sm=stockMassKg(stock,part.material);
-  const netMass=partNetMassKg(part);
-  const util=sm>0?(netMass/sm)*100:0;
-  const waste=Math.max(0,sm-netMass);
-  const utilClass=util>=50?"good":util>=25?"warn":"poor";
-  return (
-    <div className="stock-block">
-      <div className="stock-head">
-        <span className="eyebrow">Stock shape</span>
-        <span className={`util-pill ${utilClass}`}><Percent size={10}/> {util.toFixed(0)}% utilization</span>
-      </div>
-      <div className="shape-picker">
-        {Object.entries(SHAPES).map(([id,s])=>(
-          <button key={id} className={stock.shape===id?"on":""} onClick={()=>updateShape(id)} title={s.label}>
-            <span className="shape-ic"><ShapeIcon shape={id} size={14}/></span>
-            {s.label}
-          </button>
-        ))}
-      </div>
-      <div className={`dim-grid ${cfg.dims.length===3?"three":"two"}`}>
-        {cfg.dims.map(k=>(
-          <div className="field" key={k}>
-            <label>{k}</label>
-            <div className="suffix">
-              <input type="number" min="0" value={stock.dims?.[k]??0} onChange={e=>updateDim(k,+e.target.value||0)}/>
-              <span className="unit">mm</span>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="stock-summary">
-        <div className="cell"><span className="lbl">Stock mass</span><span className="val">{sm.toFixed(3)} kg</span></div>
-        <div className="cell center"><span className="lbl">Net part</span><span className="val">{netMass.toFixed(3)} kg</span></div>
-        <div className="cell right"><span className="lbl">Waste (chip)</span><span className="val">{waste.toFixed(3)} kg</span></div>
-      </div>
-    </div>
-  );
-}
-
-/* ===========================================================
-   Material card
-   =========================================================== */
-
-function MaterialCard({ materialId }: { materialId:string }) {
-  const m=MATERIALS[materialId];
-  if (!m) return null;
-  return (
-    <div className="material-card">
-      <span className="swatch" style={{background:m.hex}}/>
-      <div className="body">
-        <div className="name">{m.label}</div>
-        <div className="grade">{m.grade}</div>
-        <div className="specs">
-          <div><span className="k">Density</span><span className="v">{m.density.toLocaleString()} kg/m³</span></div>
-          <div style={{gridColumn:"span 2",marginTop:4}}>
-            <span className="k" style={{marginBottom:4}}>Rates per form (₹/kg)</span>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {Object.entries(m.rates).map(([f,r])=>(
-                <div key={f} className="status-pill" style={{fontSize:10,padding:"2px 6px"}}>
-                  <span style={{color:"var(--text-3)",marginRight:4,textTransform:"capitalize"}}>{f}:</span>
-                  {r.toFixed(0)}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ===========================================================
    Parts table
    =========================================================== */
@@ -748,14 +663,14 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
       </div>
       <table className="parts-table">
         <colgroup>
-          <col style={{ width: 32 }} />
+          <col style={{ width: 28 }} />
           <col />
-          <col style={{ width: 140 }} />
-          <col style={{ width: 80 }} />
-          <col style={{ width: 60 }} />
-          <col style={{ width: 200 }} />
-          <col style={{ width: 170 }} />
-          <col style={{ width: 32 }} />
+          <col style={{ width: "15%", minWidth: 80 }} />
+          <col style={{ width: "8%",  minWidth: 50 }} />
+          <col style={{ width: "6%",  minWidth: 36 }} />
+          <col style={{ width: "20%", minWidth: 90 }} />
+          <col style={{ width: "17%", minWidth: 80 }} />
+          <col style={{ width: 26 }} />
         </colgroup>
         <thead>
           <tr>
@@ -934,17 +849,14 @@ function Field({ label, value, unit, type="text", onChange, grid }: { label:stri
   );
 }
 
-function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, setCommercial }: {
-  parts:Part[]; setParts:(p:Part[])=>void;
+function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
+  parts:Part[];
   asmQty:number; setAsmQty:(v:number)=>void;
-  selectedId:string|null;
   commercial:{marginPct:number;taxPct:number}; setCommercial:(v:{marginPct:number;taxPct:number})=>void;
 }) {
   const { id } = useParams<{ id: string }>();
   const { rfq, setRfq } = useQuoteState();
   const [tab, setTab] = useState<"inputs"|"history"|"notes">("inputs");
-  const selected=parts.find(p=>p.id===selectedId)||null;
-  function updateSelected(patch:Partial<Part>) { if (!selected) return; setParts(parts.map(p=>p.id===selected.id?{...p,...patch}:p)); }
   const r=rollup(parts,asmQty,commercial);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
   const lead=computeLeadTime(parts,asmQty);
@@ -964,53 +876,11 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
       <div style={{flex:1,minHeight:0,overflow:"auto",display:"flex",flexDirection:"column"}}>
         {tab==="inputs"&&(
           <>
-            {selected?(
-              <div className="selected-bar" style={{marginTop:10}}>
-                <span className="swatch" style={{background:selected.color}}/><span className="lbl">Editing</span>
-                <span className="pname">{selected.name}</span><span className="meta">#{selected.id}</span>
-              </div>
-            ):(
-              <div className="selected-bar" style={{marginTop:10,background:"var(--panel-2)",borderColor:"var(--border)",color:"var(--text-3)"}}>
-                <MousePointer2 size={12}/><span>Click a body in the preview or table to edit its inputs</span>
-              </div>
-            )}
-            <div className="rfq-fields">
+<div className="rfq-fields">
               <Field label="Customer" value={rfq.customer} grid="1/-1" onChange={v=>setRfq({...rfq, customer:String(v)})}/>
               <Field label="Project" value={rfq.project} onChange={v=>setRfq({...rfq, project:String(v)})}/>
               <Field label="RFQ ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
-              {selected&&(
-                <>
-                  <div className="full" style={{marginTop:4}}><div className="eyebrow">Material · {selected.name}</div></div>
-                  <div className="field" style={{gridColumn:"1/-1"}}>
-                    <label>Stock</label>
-                    <select value={selected.material} onChange={e=>updateSelected({material:e.target.value})}>
-                      {Object.entries(MATERIALS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                    </select>
-                  </div>
-                  <Field label="Rate / kg" value={getMaterialRate(selected.material,selected.stock?.shape).toFixed(2)} type="number" unit="₹"/>
-                  <Field label="Per assembly" value={selected.perAssembly} type="number" onChange={v=>updateSelected({perAssembly:v as number})}/>
-                </>
-              )}
             </div>
-            {selected&&!selected.stocked&&<MaterialCard materialId={selected.material}/>}
-            {selected&&!selected.stocked&&<StockEditor part={selected} onChange={updateSelected}/>}
-            {selected&&!selected.stocked&&(
-              <>
-                <div className="sub-head"><span className="eyebrow">Machining operations</span><span className="muted" style={{marginLeft:"auto",fontSize:10.5,fontFamily:"var(--font-mono)"}}>qty × {partQty(selected,asmQty)}</span></div>
-                <OperationsEditor part={selected} qty={partQty(selected,asmQty)} onChange={updateSelected}/>
-              </>
-            )}
-            {selected&&selected.stocked&&(
-              <div style={{margin:"8px 14px",padding:10,background:"var(--panel-2)",border:"1px dashed var(--border)",borderRadius:6,fontSize:12,color:"var(--text-3)"}}>
-                <Package size={12} style={{verticalAlign:-2,marginRight:6}}/>Purchased part — no in-house machining.
-              </div>
-            )}
-            {selected&&!selected.stocked&&(
-              <div className="rfq-fields" style={{paddingTop:8}}>
-                <div className="full"><div className="eyebrow">Finishing</div></div>
-                <Field label="Finishing / unit" value={selected.finishing.toFixed(2)} type="number" unit="₹" onChange={v=>updateSelected({finishing:v as number})}/>
-              </div>
-            )}
             <div className="rfq-fields" style={{paddingTop:8}}>
               <div className="full"><div className="eyebrow">Commercial · whole quote</div></div>
               <Field label="Margin" value={commercial.marginPct} type="number" unit="%" onChange={v=>setCommercial({...commercial,marginPct:v as number})}/>
@@ -1024,7 +894,7 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
             <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial}/>
             <LeadTimeBar lead={lead}/>
             <div style={{height:10}}/>
-          </>
+</>
         )}
         {tab==="history"&&(
           <div className="recents">
@@ -1046,14 +916,7 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
           </div>
         )}
       </div>
-      <div className="asm-qty-row">
-        <span className="lbl">Assembly qty</span>
-        <span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{totalQty} parts total</span>
-        <input type="number" min="1" value={asmQty} onChange={e=>setAsmQty(Math.max(1,+e.target.value||1))}/>
-      </div>
-      <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial}/>
-      <LeadTimeBar lead={lead}/>
-      <div className="total-panel big" style={{marginTop:12}}>
+      <div className="total-panel big">
         <div className="total-row">
           <span className="label">Quotation total</span>
           <span className="chip success"><span className="dot"/>Within target</span>
@@ -1193,6 +1056,12 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
   const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial } = useQuoteState();
   const [showAll, setShowAll] = useState(false);
   const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
+  const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem("quote.previewCollapsed") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("quote.previewCollapsed", previewCollapsed ? "1" : "0"); } catch { /* ignore */ }
+  }, [previewCollapsed]);
   useCatalogVersion();
   useEffect(() => {
     loadCatalog();
@@ -1217,20 +1086,35 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
     }
   }, [pendingHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Defer the right-rail selection so the row highlight + 3D body update commit
-  // immediately; the heavy StockEditor/OperationsEditor remount happens in a
-  // follow-up render and never blocks the click.
-  const deferredSelectedId = useDeferredValue(selectedId);
-
   return (
     <>
     <div className="quote-grid">
       <div className="right-col">
-        <div className="panel preview-panel">
-          <div className="panel-head">
+        <div className={`panel preview-panel ${previewCollapsed ? "collapsed" : ""}`}>
+          <div
+            className={`panel-head ${previewCollapsed ? "preview-head-collapsed" : ""}`}
+            onClick={previewCollapsed ? () => setPreviewCollapsed(false) : undefined}
+            style={previewCollapsed ? { cursor: "pointer" } : undefined}
+            title={previewCollapsed ? "Click to expand preview" : undefined}
+          >
+            <button
+              className="preview-collapse-toggle"
+              onClick={e => { e.stopPropagation(); setPreviewCollapsed(v => !v); }}
+              title={previewCollapsed ? "Expand preview" : "Collapse preview"}
+              aria-expanded={!previewCollapsed}
+            >
+              {previewCollapsed ? <ChevronRight size={14}/> : <ChevronDown size={14}/>}
+            </button>
+            <Box size={13} style={{ color: "var(--accent)", flexShrink: 0 }}/>
             <span className="title">Preview</span>
+            {previewCollapsed && (() => {
+              const sel = parts.find(p => p.id === selectedId);
+              return sel
+                ? <span className="preview-sel-chip"><span className="swatch" style={{ background: sel.color }}/>{sel.name}</span>
+                : <span className="muted" style={{ fontSize: 11, color: "var(--text-3)" }}>click to view</span>;
+            })()}
             <div className="right" style={{ gap: 6 }}>
-              {cad && (
+              {cad && !previewCollapsed && (
                 <button
                   onClick={() => setShowAll(v => !v)}
                   title={showAll ? "Show only the selected part" : "Show the full assembly"}
@@ -1244,7 +1128,7 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
                     fontWeight: 500,
                     borderRadius: 5,
                     border: "1px solid var(--accent)",
-                    background: showAll ? "var(--accent)" : "var(--panel-1)",
+                    background: showAll ? "var(--accent)" : "var(--panel)",
                     color: showAll ? "#fff" : "var(--accent)",
                   }}
                 >
@@ -1254,7 +1138,7 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
               <button className="btn sm ghost" onClick={onOpenViewer} title="Open in full viewer"><ExternalLink size={12}/></button>
             </div>
           </div>
-          {cad
+          {!previewCollapsed && (cad
             ? <QuoteCadPreview
                 model={cad}
                 selectedId={selectedId}
@@ -1263,9 +1147,9 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
                   return p?.meshIds ?? (selectedId ? [selectedId] : []);
                 })()}
                 showAll={showAll}/>
-            : <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId}/>}
+            : <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId}/>)}
         </div>
-        <RfqRail parts={parts} setParts={setParts} asmQty={asmQty} setAsmQty={setAsmQty} selectedId={deferredSelectedId} commercial={commercial} setCommercial={setCommercial}/>
+        <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial}/>
       </div>
       <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} searchQuery={searchQuery}/>
       <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty}/>
