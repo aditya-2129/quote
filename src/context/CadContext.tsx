@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useState, type ReactNode } from "react";
 import { importStepFile, importStepUrl } from "@utils/index";
 import type { CadImportResult } from "@utils/index";
 
@@ -6,8 +6,11 @@ interface CadCtx {
   cad: CadImportResult | null;
   isImporting: boolean;
   importStatus: string;
+  pendingHandoff: boolean;
   handleFile: (file?: File) => Promise<void>;
   handleTestFile: (fileName: string) => Promise<void>;
+  requestHandoff: () => void;
+  consumeHandoff: () => CadImportResult | null;
 }
 
 const CadContext = createContext<CadCtx | null>(null);
@@ -16,6 +19,7 @@ export function CadProvider({ children }: { children: ReactNode }) {
   const [cad, setCad] = useState<CadImportResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatus, setStatus] = useState("Import a STEP file to get started");
+  const [pendingHandoff, setPendingHandoff] = useState(false);
 
   const handleFile = async (file?: File) => {
     if (!file) return;
@@ -46,8 +50,15 @@ export function CadProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const requestHandoff = useCallback(() => setPendingHandoff(true), []);
+
+  const consumeHandoff = useCallback((): CadImportResult | null => {
+    setPendingHandoff(false);
+    return cad;
+  }, [cad]);
+
   return (
-    <CadContext.Provider value={{ cad, isImporting, importStatus, handleFile, handleTestFile }}>
+    <CadContext.Provider value={{ cad, isImporting, importStatus, pendingHandoff, handleFile, handleTestFile, requestHandoff, consumeHandoff }}>
       {children}
     </CadContext.Provider>
   );

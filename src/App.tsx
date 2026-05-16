@@ -1,12 +1,12 @@
-import { HashRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, Outlet, useParams } from "react-router-dom";
 import { Layout } from "@components/Layout";
 import { CadProvider } from "@context/CadContext";
+import { QuoteStateProvider } from "@context/QuoteStateContext";
 import {
   ViewerPage,
   RfqsPage,
   QuotesPage,
   QuoteDetailPage,
-  QuoteViewerPage,
   PartsPage,
   CustomersPage,
   AnalyticsPage,
@@ -15,10 +15,11 @@ import {
 } from "@pages/index";
 
 function QuoteLayout() {
+  const { id } = useParams<{ id: string }>();
   return (
-    <CadProvider>
+    <QuoteStateProvider key={id}>
       <Outlet />
-    </CadProvider>
+    </QuoteStateProvider>
   );
 }
 
@@ -33,7 +34,7 @@ function App() {
           <Route path="/quotes" element={<QuotesPage />} />
           <Route path="/quotes/:id" element={<QuoteLayout />}>
             <Route index element={<QuoteDetailPage />} />
-            <Route path="viewer" element={<QuoteViewerPage />} />
+            <Route path="viewer" element={<Navigate to="/viewer" replace />} />
           </Route>
           <Route path="/parts" element={<PartsPage />} />
           <Route path="/customers" element={<CustomersPage />} />

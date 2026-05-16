@@ -3,10 +3,13 @@ import {
   useEffect,
   useRef,
 } from "react";
+import { useCad } from "@context/CadContext";
+import { useQuoteState } from "@context/QuoteStateContext";
+import { cadResultToParts } from "@utils/cadHandoff";
+import type { Part, Op, Stock } from "@utils/quoteTypes";
 import {
   Box,
   BoxesIcon,
-  Calculator,
   Check,
   ChevronDown,
   ChevronUp,
@@ -31,7 +34,6 @@ import {
   Search,
   Send,
   Settings2,
-  Share2,
   ShieldCheck,
   Sliders,
   Truck,
@@ -72,60 +74,8 @@ const SHAPES: Record<string, { label: string; dims: string[] }> = {
   "tube":       { label: "Tube",       dims: ["OD","ID","L"] },
 };
 
-type Op = { id: string; machine: string; setupMin: number; cycleMin: number };
-type Stock = { shape: string; dims: Record<string, number> };
-type Part = {
-  id: string; name: string; color: string;
-  material: string; perAssembly: number; mass: number; finishing: number; included: boolean; stocked?: boolean;
-  stock: Stock | null;
-  operations: Op[];
-};
-
 let __opSeq = 100;
 const opId = () => `op-${++__opSeq}`;
-
-const INITIAL_PARTS: Part[] = [
-  {
-    id: "body-base", name: "Body · base plate", color: "#7b8a9f",
-    material: "al-6061", perAssembly: 1, mass: 0.221, finishing: 1.20, included: true,
-    stock: { shape: "plate", dims: { L:240, W:130, H:28 } },
-    operations: [
-      { id: opId(), machine: "mill-3ax", setupMin:18, cycleMin:6.0 },
-      { id: opId(), machine: "drill",    setupMin:4,  cycleMin:2.0 },
-      { id: opId(), machine: "deburr",   setupMin:0,  cycleMin:0.8 },
-    ],
-  },
-  {
-    id: "body-mid", name: "Body · mid block", color: "#9ca5b3",
-    material: "al-6061", perAssembly: 1, mass: 0.158, finishing: 1.20, included: true,
-    stock: { shape: "block", dims: { L:160, W:90, H:45 } },
-    operations: [
-      { id: opId(), machine: "mill-3ax", setupMin:14, cycleMin:5.0 },
-      { id: opId(), machine: "drill",    setupMin:3,  cycleMin:1.5 },
-    ],
-  },
-  {
-    id: "body-cap", name: "Body · cap", color: "#2f4f7d",
-    material: "mat-ms", perAssembly: 1, mass: 0.124, finishing: 1.60, included: true,
-    stock: { shape: "block", dims: { L:85, W:50, H:28 } },
-    operations: [
-      { id: opId(), machine: "mill-3ax", setupMin:12, cycleMin:4.0 },
-      { id: opId(), machine: "drill",    setupMin:3,  cycleMin:1.0 },
-      { id: opId(), machine: "tap",      setupMin:4,  cycleMin:1.0 },
-      { id: opId(), machine: "deburr",   setupMin:0,  cycleMin:0.5 },
-    ],
-  },
-  {
-    id: "fastener", name: "M6×12 hex socket", color: "#c0c0c0",
-    material: "stock", perAssembly: 4, mass: 0.008, finishing: 0, included: true, stocked: true,
-    stock: null, operations: [],
-  },
-  {
-    id: "oring", name: "O-ring 18×2 NBR", color: "#1f1f1f",
-    material: "stock", perAssembly: 1, mass: 0.002, finishing: 0, included: false, stocked: true,
-    stock: null, operations: [],
-  },
-];
 
 const TOOLING_BATCH = 244;
 const INSPECTION_BATCH = 326;
@@ -244,7 +194,7 @@ function ShapeIcon({ shape, size=14 }: { shape:string; size?:number }) {
    Quote preview (SVG)
    =========================================================== */
 
-function QuotePreview({ parts, selectedId, onSelect }: { parts:Part[]; selectedId:string|null; onSelect:(id:string|null)=>void }) {
+function QuotePreview({ parts, selectedId, onSelect, title }: { parts:Part[]; selectedId:string|null; onSelect:(id:string|null)=>void; title?:string }) {
   const c30=Math.cos(Math.PI/6), s30=Math.sin(Math.PI/6);
 
   function cuboid(id:string, cx:number, cy:number, w:number, h:number, d:number, topC:string, leftC:string, rightC:string) {
@@ -271,7 +221,7 @@ function QuotePreview({ parts, selectedId, onSelect }: { parts:Part[]; selectedI
     <div className="canvas" style={{flex:1,minHeight:0}} onClick={()=>onSelect(null)}>
       <div className="canvas-grid"/>
       <div className="canvas-hud-top">
-        <span className="pill"><Box size={11}/> Pump Manifold v3</span>
+        {title && <span className="pill"><Box size={11}/> {title}</span>}
         <span className="pill">Click a body to edit</span>
       </div>
       <div style={{position:"absolute",inset:0,display:"grid",placeItems:"center"}}>
@@ -661,6 +611,8 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
   selectedId:string|null;
   commercial:{marginPct:number;taxPct:number}; setCommercial:(v:{marginPct:number;taxPct:number})=>void;
 }) {
+  const { id } = useParams<{ id: string }>();
+  const { rfq, setRfq } = useQuoteState();
   const [tab, setTab] = useState<"inputs"|"history"|"notes">("inputs");
   const selected=parts.find(p=>p.id===selectedId)||null;
   function updateSelected(patch:Partial<Part>) { if (!selected) return; setParts(parts.map(p=>p.id===selected.id?{...p,...patch}:p)); }
@@ -672,8 +624,8 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
   return (
     <div className="panel rfq-panel">
       <div className="panel-head">
-        <span className="title">RFQ-2026-014</span>
-        <div className="right"><span className="chip"><BoxesIcon size={11}/> Acme Mfg.</span></div>
+        <span className="title">{rfq.rfqRef || id || "RFQ"}</span>
+        {rfq.customer && <div className="right"><span className="chip"><BoxesIcon size={11}/> {rfq.customer}</span></div>}
       </div>
       <div className="tabstrip">
         <button className={tab==="inputs"?"on":""} onClick={()=>setTab("inputs")}><Sliders size={13}/> Inputs</button>
@@ -694,9 +646,9 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
               </div>
             )}
             <div className="rfq-fields">
-              <Field label="Customer" value="Acme Manufacturing" grid="1/-1"/>
-              <Field label="Project" value="Pump Manifold v3"/>
-              <Field label="RFQ ref" value="RFQ-2026-014"/>
+              <Field label="Customer" value={rfq.customer} grid="1/-1" onChange={v=>setRfq({...rfq, customer:String(v)})}/>
+              <Field label="Project" value={rfq.project} onChange={v=>setRfq({...rfq, project:String(v)})}/>
+              <Field label="RFQ ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
               {selected&&(
                 <>
                   <div className="full" style={{marginTop:4}}><div className="eyebrow">Material · {selected.name}</div></div>
@@ -795,11 +747,48 @@ function RfqRail({ parts, setParts, asmQty, setAsmQty, selectedId, commercial, s
    Quote workspace
    =========================================================== */
 
+function ConfirmReplaceModal({ existingCount, incomingCount, fileName, onReplace, onCancel }: {
+  existingCount: number; incomingCount: number; fileName: string;
+  onReplace: () => void; onCancel: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-icon"><TriangleAlert size={20} /></div>
+        <p className="confirm-msg">
+          Replace {existingCount} configured {existingCount === 1 ? "part" : "parts"} with {incomingCount}{" "}
+          {incomingCount === 1 ? "body" : "bodies"} from <strong>{fileName}</strong>?
+          This will clear materials, stock and operations you've set.
+        </p>
+        <div className="confirm-actions">
+          <button className="btn sm" onClick={onCancel}>Cancel</button>
+          <button className="btn sm danger" onClick={onReplace}>Replace</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
-  const [parts, setParts] = useState<Part[]>(INITIAL_PARTS);
-  const [selectedId, setSelectedId] = useState<string|null>("body-cap");
-  const [asmQty, setAsmQty] = useState(25);
-  const [commercial, setCommercial] = useState({marginPct:18,taxPct:0});
+  const { cad, pendingHandoff, consumeHandoff } = useCad();
+  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial } = useQuoteState();
+  const cadName = cad?.fileName?.replace(/\.[^.]+$/, "") ?? "";
+  const bbox = cad?.geometry?.boundingBoxMm;
+  const previewSub = cad
+    ? `${cad.fileName}${bbox ? ` · ${bbox.x.toFixed(1)} × ${bbox.y.toFixed(1)} × ${bbox.z.toFixed(1)} mm` : ""}`
+    : `${parts.length} ${parts.length === 1 ? "body" : "bodies"}`;
+  const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
+
+  useEffect(() => {
+    if (!pendingHandoff || !cad) return;
+    if (parts.length === 0) {
+      const imported = cadResultToParts(consumeHandoff()!);
+      setParts(imported);
+      setSelectedId(imported[0]?.id ?? null);
+    } else {
+      setConfirmHandoff({ incomingCount: cad.meshes.length, fileName: cad.fileName });
+    }
+  }, [pendingHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const r=rollup(parts,asmQty,commercial);
   const lead=computeLeadTime(parts,asmQty);
@@ -843,17 +832,18 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
   const totalMachineMin=parts.filter(p=>p.included).reduce((a,p)=>a+(p.operations||[]).reduce((b,op)=>b+opMinutes(op,partQty(p,asmQty)),0),0);
 
   return (
+    <>
     <div className="quote-grid">
       <div className="panel preview-panel">
         <div className="panel-head">
           <span className="title">Part preview</span>
-          <span className="sub">Pump Manifold v3.step · 128.4 × 86.2 × 42.6 mm</span>
+          <span className="sub">{previewSub}</span>
           <div className="right">
             <span className="chip warning"><span className="dot"/>{DFM_ISSUES.length} DFM issues</span>
             <button className="btn sm ghost" onClick={onOpenViewer}><ExternalLink size={12}/> Open in viewer</button>
           </div>
         </div>
-        <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId}/>
+        <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId} title={cadName}/>
         <div className="metric-strip">
           <div><div className="label"><BoxesIcon size={12}/> Bodies</div><div className="value">{parts.filter(p=>p.included).length}<span className="muted" style={{fontSize:11}}> / {parts.length}</span></div></div>
           <div><div className="label"><Scale size={12}/> Total mass</div><div className="value">{parts.filter(p=>p.included).reduce((a,p)=>a+p.mass*partQty(p,asmQty),0).toFixed(2)} <span className="muted" style={{fontSize:11}}>kg</span></div></div>
@@ -905,6 +895,24 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
         )}
       </div>
     </div>
+    {confirmHandoff && cad && (
+      <ConfirmReplaceModal
+        existingCount={parts.length}
+        incomingCount={confirmHandoff.incomingCount}
+        fileName={confirmHandoff.fileName}
+        onReplace={() => {
+          const imported = cadResultToParts(consumeHandoff()!);
+          setParts(imported);
+          setSelectedId(imported[0]?.id ?? null);
+          setConfirmHandoff(null);
+        }}
+        onCancel={() => {
+          consumeHandoff();
+          setConfirmHandoff(null);
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -919,9 +927,10 @@ declare global {
 }
 
 export function QuoteDetailPage() {
-  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const quoteState = "draft";
+  const { id } = useParams<{ id: string }>();
+  const { cad } = useCad();
+  const { rfq } = useQuoteState();
   const searchQuery = "";
 
   useEffect(() => {
@@ -929,40 +938,32 @@ export function QuoteDetailPage() {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       const inField = tag==="input"||tag==="textarea"||tag==="select"||(e.target as HTMLElement)?.isContentEditable;
       if (e.key==="/"&&!inField) { e.preventDefault(); window.__focusGlobalSearch?.(); return; }
-      if (inField) return;
-      if (e.key.toLowerCase()==="v") navigate(`/quotes/${id}/viewer`);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [id, navigate]);
+  }, []);
 
-  const subText = `${quoteState==="draft"?"Draft":"Quote"} · revision C${searchQuery?` · filter: "${searchQuery}"`:""}`;
+  const cadName = cad?.fileName?.replace(/\.[^.]+$/, "") ?? "";
+  const title = rfq.project || cadName || "Untitled quote";
+  const subText = `Draft${searchQuery?` · filter: "${searchQuery}"`:""}`;
+  const quoteRef = rfq.rfqRef || id || "";
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1 className="page-title">Quote · Pump Manifold v3</h1>
+          <h1 className="page-title">Quote · {title}</h1>
           <div className="page-sub">
             <span className="status-dot"/>
             <span>{subText}</span>
-            <span style={{color:"var(--text-4)"}}>•</span>
-            <span className="quote-num">RFQ-2026-014</span>
-          </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <button className="btn sm"><Share2 size={13}/> Share</button>
-          <div className="seg">
-            <button onClick={() => navigate(`/quotes/${id}/viewer`)}>
-              <Box size={13}/> Viewer <span className="kbd-key" style={{marginLeft:6,fontSize:9,padding:"1px 4px",minWidth:0}}>V</span>
-            </button>
-            <button className="on">
-              <Calculator size={13}/> Quote <span className="kbd-key" style={{marginLeft:6,fontSize:9,padding:"1px 4px",minWidth:0}}>Q</span>
-            </button>
+            {quoteRef && <>
+              <span style={{color:"var(--text-4)"}}>•</span>
+              <span className="quote-num">{quoteRef}</span>
+            </>}
           </div>
         </div>
       </div>
-      <QuoteWorkspace searchQuery={searchQuery} onOpenViewer={() => navigate(`/quotes/${id}/viewer`)} />
+      <QuoteWorkspace searchQuery={searchQuery} onOpenViewer={() => navigate("/viewer")} />
     </div>
   );
 }

@@ -31,6 +31,7 @@ import {
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult } from "@utils/index";
 import { analyzeShape, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
+import { useCad } from "@context/CadContext";
 
 export function ViewerWorkspace({ cad, isImporting, onFile }: {
   cad: CadImportResult | null;
@@ -38,6 +39,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   onFile: (file?: File) => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const { requestHandoff } = useCad();
   const viewerRef = useRef<CadViewerHandle | null>(null);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
@@ -178,7 +180,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             <button
               className="btn"
               style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, fontWeight: 600 }}
-              onClick={() => navigate("/quotes")}
+              onClick={() => { requestHandoff(); navigate(`/quotes/q-${Date.now().toString(36)}`); }}
             >
               <ReceiptText size={14} />
               Move to Quotation
