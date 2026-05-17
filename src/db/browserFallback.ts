@@ -21,14 +21,10 @@ import type {
   QuoteStatus,
   Rfq,
   RfqStatus,
-  DfmIssue,
-  DfmSeverity,
-  NewDfmIssue,
 } from "./schema";
 
 type BrowserDb = {
   customers: Customer[];
-  dfmIssues: DfmIssue[];
   machines: Machine[];
   materials: Material[];
   partGeometry: PartGeometry[];
@@ -92,9 +88,6 @@ const initialDb: BrowserDb = {
   partOperations: [
     { id: "op-demo-body-setup", partId: "part-demo-body", machineId: "mach-mill3ax", setupMin: 45, cycleMin: 18, notes: "Rough and finish milling", sortOrder: 0, createdAt: seedDate },
     { id: "op-demo-body-inspect", partId: "part-demo-body", machineId: "mach-cmm", setupMin: 15, cycleMin: 4, notes: null, sortOrder: 1, createdAt: seedDate },
-  ],
-  dfmIssues: [
-    { id: "dfm-demo-radius", partId: "part-demo-body", severity: "warn", title: "Tight internal radius", description: "One pocket corner may require a small tool.", impactCost: 350, suggestion: "Increase the radius if function allows.", isActionable: true, isDismissed: false, createdAt: seedDate },
   ],
   rfqs: [
     { id: "rfq-demo", customerId: "cust-acme", title: "Pump Manifold v3", referenceNumber: "RFQ-2026-014", description: "Browser fallback RFQ for UI testing.", status: "reviewing", receivedAt: seedDate, dueDate: new Date("2026-05-28T00:00:00.000Z"), notes: null, createdAt: seedDate, updatedAt: seedDate },
@@ -172,7 +165,6 @@ function deletePartRows(db: BrowserDb, partId: string): void {
   db.partStock = db.partStock.filter(row => row.partId !== partId);
   db.partGeometry = db.partGeometry.filter(row => row.partId !== partId);
   db.partOperations = db.partOperations.filter(row => row.partId !== partId);
-  db.dfmIssues = db.dfmIssues.filter(row => row.partId !== partId);
 }
 
 function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
@@ -525,46 +517,6 @@ export const browserDb = {
     const db = readDb();
     const order = new Map(orderedIds.map((id, index) => [id, index]));
     db.partOperations = db.partOperations.map(row => order.has(row.id) ? { ...row, sortOrder: order.get(row.id)! } : row);
-    writeDb(db);
-  },
-
-  getDfmIssuesByPart(partId: string): DfmIssue[] {
-    return readDb().dfmIssues.filter(row => row.partId === partId);
-  },
-  getDfmIssuesBySeverity(partId: string, severity: DfmSeverity): DfmIssue[] {
-    return readDb().dfmIssues.filter(row => row.partId === partId && row.severity === severity);
-  },
-  createDfmIssue(data: Omit<NewDfmIssue, "createdAt"> & { id?: string }): DfmIssue {
-    const db = readDb();
-    const row: DfmIssue = {
-      severity: "info",
-      description: null,
-      impactCost: 0,
-      suggestion: null,
-      isActionable: false,
-      isDismissed: false,
-      ...data,
-      id: data.id ?? newId("dfm"),
-      createdAt: now(),
-    };
-    db.dfmIssues.push(row);
-    writeDb(db);
-    return row;
-  },
-  dismissDfmIssue(id: string): void {
-    const db = readDb();
-    const index = db.dfmIssues.findIndex(row => row.id === id);
-    if (index >= 0) db.dfmIssues[index] = { ...db.dfmIssues[index]!, isDismissed: true };
-    writeDb(db);
-  },
-  deleteDfmIssue(id: string): void {
-    const db = readDb();
-    db.dfmIssues = db.dfmIssues.filter(row => row.id !== id);
-    writeDb(db);
-  },
-  clearDfmIssuesForPart(partId: string): void {
-    const db = readDb();
-    db.dfmIssues = db.dfmIssues.filter(row => row.partId !== partId);
     writeDb(db);
   },
 

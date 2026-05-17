@@ -1,6 +1,5 @@
 export * from "./app_settings";
 export * from "./customers";
-export * from "./dfm_issues";
 export * from "./machines";
 export * from "./materials";
 export * from "./notifications";

@@ -1,6 +1,4 @@
 import {
-  clearDfmIssuesForPart,
-  createDfmIssue,
   createOperation,
   createPart,
   createQuote,
@@ -15,7 +13,6 @@ import {
   getAllMachines,
   getAllMaterials,
   getAllQuotes,
-  getDfmIssuesByPart,
   getOperationsByPart,
   getPartGeometry,
   getPartById,
@@ -34,8 +31,6 @@ import {
   upsertQuoteCadSource,
 } from "./queries";
 import type {
-  DfmIssue,
-  DfmSeverity,
   PartGeometry,
   ProjectNameSource,
   Quote,
@@ -78,21 +73,8 @@ export type QuoteWorkflowPartGeometryDraft = {
   vertexCount?: number;
 };
 
-export type QuoteWorkflowDfmIssueDraft = {
-  id?: string;
-  partId: string;
-  severity: DfmSeverity;
-  title: string;
-  description?: string | null;
-  impactCost?: number;
-  suggestion?: string | null;
-  isActionable?: boolean;
-  isDismissed?: boolean;
-};
-
 export type QuoteWorkflowPartDraft = Part & {
   geometry?: QuoteWorkflowPartGeometryDraft | null;
-  dfmIssues?: QuoteWorkflowDfmIssueDraft[];
 };
 
 export type QuoteWorkflowCadSource = {
@@ -112,7 +94,6 @@ export type QuoteWorkflowDraft = {
   inspectionCost?: number;
   quantityBreaks?: number[];
   costSnapshot?: QuoteCostSnapshot | null;
-  dfmIssues?: QuoteWorkflowDfmIssueDraft[];
   fileName?: string;
   /** 'auto' = title was generated (file name / 'Untitled quote N'); 'user' = typed by hand. Drives whether a CAD attach is allowed to overwrite the title. */
   projectNameSource?: ProjectNameSource | null;
@@ -300,20 +281,6 @@ function operationToDraft(operation: import("./schema").PartOperation): Op {
   };
 }
 
-function dfmToDraft(issue: DfmIssue): QuoteWorkflowDfmIssueDraft {
-  return {
-    id: issue.id,
-    partId: issue.partId,
-    severity: issue.severity,
-    title: issue.title,
-    description: issue.description,
-    impactCost: issue.impactCost,
-    suggestion: issue.suggestion,
-    isActionable: issue.isActionable,
-    isDismissed: issue.isDismissed,
-  };
-}
-
 async function savePartChildren(
   part: QuoteWorkflowPartDraft,
   quoteId: string,
@@ -396,27 +363,6 @@ async function savePartChildren(
   }
 }
 
-async function replaceDfmIssues(
-  partId: string,
-  issues: QuoteWorkflowDfmIssueDraft[] | undefined,
-): Promise<void> {
-  if (issues === undefined) return;
-  await clearDfmIssuesForPart(partId);
-  for (const issue of issues) {
-    await createDfmIssue({
-      id: issue.id,
-      partId,
-      severity: issue.severity,
-      title: issue.title,
-      description: issue.description ?? null,
-      impactCost: finiteNumber(issue.impactCost),
-      suggestion: issue.suggestion ?? null,
-      isActionable: issue.isActionable ?? false,
-      isDismissed: issue.isDismissed ?? false,
-    });
-  }
-}
-
 async function normalizePartIdsForQuote(
   quoteId: string,
   parts: QuoteWorkflowPartDraft[],
@@ -438,7 +384,6 @@ async function normalizePartIdsForQuote(
     normalized.push({
       ...part,
       id,
-      dfmIssues: part.dfmIssues?.map((issue) => ({ ...issue, partId: id })),
     });
   }
 
@@ -557,17 +502,6 @@ export async function saveQuoteWorkflow(
     }
   }
 
-  const dfmByPartId = new Map<string, QuoteWorkflowDfmIssueDraft[]>();
-  for (const issue of draft.dfmIssues ?? []) {
-    const partId = normalized.idMap.get(issue.partId) ?? issue.partId;
-    const issues = dfmByPartId.get(partId) ?? [];
-    issues.push({ ...issue, partId });
-    dfmByPartId.set(partId, issues);
-  }
-  for (const part of normalized.parts) {
-    await replaceDfmIssues(part.id, part.dfmIssues ?? dfmByPartId.get(part.id));
-  }
-
   if (draft.cadSource && draft.cadSource.bytes.length > 0) {
     await upsertQuoteCadSource({
       quoteId: quote.id,
@@ -590,22 +524,18 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
   const rfqMeta = decodeMeta<RfqNotesMeta>(rfq?.notes);
   const partRows = await getPartsByQuote(quote.id);
   const parts: QuoteWorkflowPartDraft[] = [];
-  const dfmIssues: QuoteWorkflowDfmIssueDraft[] = [];
 
   for (const partRow of partRows) {
     const part = toPartDraft(partRow);
-    const [stock, geometry, operations, issues] = await Promise.all([
+    const [stock, geometry, operations] = await Promise.all([
       getPartStock(part.id),
       getPartGeometry(part.id),
       getOperationsByPart(part.id),
-      getDfmIssuesByPart(part.id),
     ]);
     part.stock = stockToDraft(stock);
     part.geometry = geometryToDraft(geometry);
     part.netVolumeMm3 = geometry?.volumeMm3 ?? part.netVolumeMm3;
     part.operations = operations.map(operationToDraft);
-    part.dfmIssues = issues.map(dfmToDraft);
-    dfmIssues.push(...part.dfmIssues);
     parts.push(part);
   }
 
@@ -637,7 +567,6 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     quantityBreaks: quote.quantityBreaks,
     costSnapshot: quote.costSnapshot,
     projectNameSource: quote.projectNameSource ?? null,
-    dfmIssues,
     cadSource,
     records: {
       rfq,
@@ -650,7 +579,6 @@ export async function deleteQuoteWorkflowChildren(quoteId: string): Promise<void
   const parts = await getPartsByQuote(quoteId);
   for (const part of parts) {
     await deleteOperationsForPart(part.id);
-    await clearDfmIssuesForPart(part.id);
     await deletePartStock(part.id);
     await deletePartGeometry(part.id);
     await deletePart(part.id);

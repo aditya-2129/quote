@@ -8,6 +8,7 @@ import {
   useRef,
   type FormEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
@@ -28,10 +29,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
-  Info,
   Layers,
-  Lightbulb,
-  OctagonX,
   Package,
   Percent,
   Plus,
@@ -40,7 +38,6 @@ import {
   Search,
   Send,
   Settings2,
-  ShieldCheck,
   Sliders,
   Square,
   Trash2,
@@ -48,14 +45,13 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createCustomer, dismissDfmIssue, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
+import { createCustomer, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
 import type { Customer } from "../db/schema";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
   calculateQuoteRollup,
   effectivePartRate,
-  materialRate,
   operationCost as calculateOperationCost,
   operationMinutes as calculateOperationMinutes,
   operationRate as calculateOperationRate,
@@ -77,31 +73,6 @@ import {
 
 type MaterialMeta = { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number>; isPurchased: boolean };
 type MachineMeta  = { label: string; rate: number; short: string };
-type DfmUiIssue = {
-  id: string;
-  partId: string;
-  severity: "error" | "warn" | "info";
-  title: string;
-  desc: string;
-  impact: number;
-  suggest: string;
-  actionable: boolean;
-  isDismissed?: boolean;
-};
-type PartWithDfm = Part & {
-  dfmIssues?: Array<{
-    id?: string;
-    partId: string;
-    severity: "error" | "warn" | "info";
-    title: string;
-    description?: string | null;
-    impactCost?: number;
-    suggestion?: string | null;
-    isActionable?: boolean;
-    isDismissed?: boolean;
-  }>;
-};
-
 // Mutable maps populated from the DB at app start. Cost utilities read from these.
 const MATERIALS: Record<string, MaterialMeta> = {};
 const MACHINES:  Record<string, MachineMeta>  = {};
@@ -184,20 +155,9 @@ const opId = () => `op-${++__opSeq}`;
 const TOOLING_BATCH = 244;
 const INSPECTION_BATCH = 326;
 
-const DFM_ISSUES: DfmUiIssue[] = [
-  { id:"dfm-1", partId:"body-cap", severity:"error", title:"Wall thickness 0.8 mm",         desc:"Below 1.0 mm minimum for steel machining. Risk of deflection during finishing.",               impact:90,  suggest:"Increase wall to ≥ 1.0 mm or accept reduced batch yield", actionable:true },
-  { id:"dfm-2", partId:"body-cap", severity:"warn",  title:"Internal corner radius 0.5 mm",  desc:"Below tool minimum for 3-axis mill. Adds tool-change time or forces 5-axis path.",            impact:120, suggest:"Relax to R1.0 mm or switch to 5-axis", actionable:true },
-  { id:"dfm-3", partId:"body-mid", severity:"warn",  title:"Deep pocket · 18 × 12 × 32 mm", desc:"Aspect ratio > 2.5 requires long-reach tooling. Adds cycle time.",                            impact:60,  suggest:"Confirm pocket depth — drawing rev C tolerance", actionable:false },
-  { id:"dfm-4", partId:"body-cap", severity:"info",  title:"Tap depth 3.2 × diameter",       desc:"Above standard 2.5× for M6 — adds tap breakage risk and inspection time.",                   impact:40,  suggest:"Verify thread engagement with customer", actionable:false },
-];
-
 /* ===========================================================
    Costing utilities
    =========================================================== */
-
-function getMaterialRate(materialId: string, stockShape?: string): number {
-  return materialRate(MATERIAL_COSTS, materialId, stockShape);
-}
 
 // Effective per-kg rate for a part: per-quote override wins, otherwise falls back to the material library.
 function partRate(p: Part): number {
@@ -212,13 +172,6 @@ function stockMassKg(stock: Stock|null, materialId: string): number {
 // Falls back to a stored `mass` value if no geometry is available (e.g. manually added parts).
 function partNetMassKg(p: Part): number {
   return calculatePartNetMassKg(p, MATERIAL_COSTS);
-}
-
-function stockUtilization(p: Part): number|null {
-  if (!p.stock||p.stocked) return null;
-  const sm = stockMassKg(p.stock, p.material);
-  const nm = partNetMassKg(p);
-  return sm>0 ? nm/sm : null;
 }
 
 const partQty = (p: Part, asmQty: number) => partQuantity(p, asmQty);
@@ -257,7 +210,6 @@ function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; t
 }
 
 function fmtINR(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function fmtINR0(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:0}); }
 function fmtMin(n: number) { return n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:1}); }
 
 function fmtStockDims(stock: Stock): string {
@@ -934,87 +886,6 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAddPart, 
 }
 
 /* ===========================================================
-   DFM panel
-   =========================================================== */
-
-const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty, onAcceptIssue }: {
-  parts:Part[];
-  onSelectPart:(id:string)=>void;
-  asmQty:number;
-  onAcceptIssue:(issue:DfmUiIssue)=>void;
-}) {
-  const dismissedIds = new Set(
-    parts.flatMap(p => ((p as PartWithDfm).dfmIssues ?? []).filter(i => i.isDismissed).map(i => i.id)).filter(Boolean) as string[],
-  );
-  const savedIssues: DfmUiIssue[] = parts.flatMap(p => ((p as PartWithDfm).dfmIssues ?? []).map(i => ({
-    id: i.id ?? `${p.id}-${i.title}`,
-    partId: i.partId || p.id,
-    severity: i.severity,
-    title: i.title,
-    desc: i.description ?? "",
-    impact: i.impactCost ?? 0,
-    suggest: i.suggestion ?? "",
-    actionable: i.isActionable ?? false,
-    isDismissed: i.isDismissed,
-  }))).filter(i => !i.isDismissed);
-  const dynamicIssues: DfmUiIssue[] = [];
-  parts.forEach(p=>{
-    if (!p.included||p.stocked||!p.stock) return;
-    const util=stockUtilization(p);
-    if (util!=null&&util<0.25) {
-      const sm=stockMassKg(p.stock,p.material), waste=Math.max(0,sm-p.mass), rate=getMaterialRate(p.material,p.stock?.shape), impact=Math.round(waste*rate*partQty(p,asmQty));
-      dynamicIssues.push({id:`dfm-util-${p.id}`,partId:p.id,severity:util<0.15?"error":"warn",title:`Low stock utilization · ${(util*100).toFixed(0)}%`,desc:`Chip waste ${waste.toFixed(3)} kg per part. Consider smaller stock or near-net shape.`,impact,suggest:"Resize stock to net + 4 mm finishing allowance",actionable:true});
-    }
-  });
-  const savedIds = new Set(savedIssues.map(i => i.id));
-  const partIds = new Set(parts.map(p => p.id));
-  const seededIssues = DFM_ISSUES.filter(i => partIds.has(i.partId));
-  const allIssues=[...savedIssues,...dynamicIssues,...seededIssues]
-    .filter(i => !dismissedIds.has(i.id))
-    .filter((i, index, rows) => savedIds.has(i.id) || rows.findIndex(row => row.id === i.id) === index);
-  const totalImpact=allIssues.reduce((a,i)=>a+(i.impact||0),0);
-  const counts=allIssues.reduce((a,i)=>({...a,[i.severity]:(a[i.severity as keyof typeof a]||0)+1}),{error:0,warn:0,info:0});
-  const partName=(id:string)=>parts.find(p=>p.id===id)?.name||id;
-  return (
-    <div className="panel dfm-panel">
-      <div className="panel-head">
-        <span className="title">DFM review</span>
-        <span className="sub">{allIssues.length} flagged · est. cost impact {fmtINR0(totalImpact)}</span>
-        <div className="right">
-          <span className="dfm-summary">
-            {counts.error>0&&<span className="chip danger" style={{height:22}}><span className="dot"/>{counts.error} blocker</span>}
-            {counts.warn>0&&<span className="chip warning" style={{height:22}}><span className="dot"/>{counts.warn} caution</span>}
-            {counts.info>0&&<span className="chip accent" style={{height:22}}><span className="dot"/>{counts.info} info</span>}
-          </span>
-          <button className="btn sm ghost"><Settings2 size={12}/> Rules</button>
-        </div>
-      </div>
-      {allIssues.length===0?(
-        <div className="dfm-empty"><div className="ic-wrap"><ShieldCheck size={18}/></div><div>No design issues flagged. Geometry is within manufacturing limits.</div></div>
-      ):(
-        <div className="dfm-list">
-          {allIssues.map(i=>{
-            const SevIcon=i.severity==="error"?OctagonX:i.severity==="warn"?TriangleAlert:Info;
-            return (
-              <div className="dfm-row" key={i.id}>
-                <div className={`dfm-sev ${i.severity}`}><SevIcon size={14} strokeWidth={2}/></div>
-                <div className="dfm-body">
-                  <div className="dfm-title"><span>{i.title}</span><button className="partref" onClick={()=>onSelectPart(i.partId)}>{partName(i.partId)}</button></div>
-                  <div className="dfm-desc">{i.desc}</div>
-                  <div className="dfm-suggest"><Lightbulb size={11}/> {i.suggest}</div>
-                </div>
-                <div className="dfm-impact"><span className="label">Cost impact</span>+{fmtINR0(i.impact)}</div>
-                <div className="dfm-actions">{i.actionable&&<button className="btn sm">Apply fix</button>}<button className="btn sm ghost" onClick={()=>onAcceptIssue(i)}>Accept</button></div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-});
-
-/* ===========================================================
    RFQ Rail
    =========================================================== */
 
@@ -1055,8 +926,11 @@ function CustomerField({
   const [isOpen, setIsOpen] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState<string | null>(null);
   const selectedCustomer = customerId ? customers.find(customer => customer.id === customerId) : null;
-  const typedName = value.trim();
-  const normalizedValue = value.trim().toLocaleLowerCase();
+  const committedLabel = selectedCustomer ? customerDisplayName(selectedCustomer) : (customerId ? value : "");
+  const [draft, setDraft] = useState(committedLabel);
+  useEffect(() => { setDraft(committedLabel); }, [committedLabel]);
+  const typedName = draft.trim();
+  const normalizedValue = typedName.toLocaleLowerCase();
   const filteredCustomers = useMemo(() => {
     if (!normalizedValue) return customers;
     return customers.filter(customer =>
@@ -1074,31 +948,23 @@ function CustomerField({
   );
   const canCreateCustomer = typedName.length > 0 && !hasExactMatch;
 
-  const applyCustomerText = useCallback((text: string) => {
-    const trimmed = text.trim();
-    const normalized = trimmed.toLocaleLowerCase();
-    const match = customers.find(customer =>
-      customerOptionLabel(customer).toLocaleLowerCase() === normalized ||
-      customer.name.toLocaleLowerCase() === normalized ||
-      customer.company?.toLocaleLowerCase() === normalized ||
-      customer.email?.toLocaleLowerCase() === normalized
-    );
-    onChange(match
-      ? { customer: customerDisplayName(match), customerId: match.id }
-      : { customer: text, customerId: null });
-  }, [customers, onChange]);
-
   const selectCustomer = useCallback((customer: Customer) => {
     onChange({ customer: customerDisplayName(customer), customerId: customer.id });
+    setDraft(customerDisplayName(customer));
     setIsOpen(false);
   }, [onChange]);
 
   const handleCustomerCreated = useCallback((customer: Customer) => {
     setCustomers(rows => [...rows, customer].sort((a, b) => customerOptionLabel(a).localeCompare(customerOptionLabel(b))));
     onChange({ customer: customerDisplayName(customer), customerId: customer.id });
+    setDraft(customerDisplayName(customer));
     setNewCustomerName(null);
     setIsOpen(false);
   }, [onChange]);
+
+  const revertDraft = useCallback(() => {
+    setDraft(committedLabel);
+  }, [committedLabel]);
 
   useEffect(() => {
     let alive = true;
@@ -1125,6 +991,7 @@ function CustomerField({
       customer.company?.toLocaleLowerCase() === normalized
     );
     if (match) onChange({ customer: customerDisplayName(match), customerId: match.id });
+    else onChange({ customer: "", customerId: null });
   }, [customerId, customers, onChange, value]);
 
   if (loadError) {
@@ -1146,15 +1013,15 @@ function CustomerField({
           id={selectId}
           name={selectId}
           placeholder="Search customers"
-          value={value}
+          value={draft}
           autoComplete="off"
           onFocus={() => setIsOpen(true)}
           onChange={event => {
-            onChange({ customer: event.target.value, customerId: null });
+            setDraft(event.target.value);
             setIsOpen(true);
           }}
-          onBlur={event => {
-            applyCustomerText(event.target.value);
+          onBlur={() => {
+            revertDraft();
             window.setTimeout(() => setIsOpen(false), 120);
           }}
         />
@@ -1228,7 +1095,7 @@ function QuoteCustomerModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: initialName,
-    company: initialName,
+    company: "",
     email: "",
     phone: "",
     address: "",
@@ -1274,7 +1141,7 @@ function QuoteCustomerModal({
     }
   };
 
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={event => event.stopPropagation()}>
         <div className="modal-head">
@@ -1382,7 +1249,8 @@ function QuoteCustomerModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1639,7 +1507,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
 
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
-  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, quoteId, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
+  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
   const [reattachPrompt, setReattachPrompt] = useState<{
     incomingFile: string;
     existingFile: string;
@@ -1754,31 +1622,6 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
     setSelectedId(id);
   }, [parts, setParts, setSelectedId]);
 
-  const acceptDfmIssue = useCallback((issue: DfmUiIssue) => {
-    setParts(current => current.map(part => {
-      if (part.id !== issue.partId) return part;
-      const partWithDfm = part as PartWithDfm;
-      const existing = partWithDfm.dfmIssues ?? [];
-      const nextIssues = existing.some(row => row.id === issue.id)
-        ? existing.map(row => row.id === issue.id ? { ...row, isDismissed: true } : row)
-        : [...existing, {
-            id: issue.id,
-            partId: issue.partId,
-            severity: issue.severity,
-            title: issue.title,
-            description: issue.desc,
-            impactCost: issue.impact,
-            suggestion: issue.suggest,
-            isActionable: issue.actionable,
-            isDismissed: true,
-          }];
-      return { ...part, dfmIssues: nextIssues } as Part;
-    }));
-    if (quoteId) {
-      void dismissDfmIssue(issue.id);
-    }
-  }, [quoteId, setParts]);
-
   return (
     <>
     <div className="quote-grid">
@@ -1850,7 +1693,6 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
         <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial}/>
       </div>
       <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} onAddPart={addManualPart} searchQuery={searchQuery}/>
-      <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty} onAcceptIssue={acceptDfmIssue}/>
 
       <CostPanel parts={parts} asmQty={asmQty} commercial={commercial}/>
     </div>
