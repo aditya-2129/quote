@@ -6,14 +6,17 @@ import {
   useId,
   useMemo,
   useRef,
+  type Dispatch,
   type FormEvent,
+  type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
 import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
-import type { Part, Op, Stock } from "@utils/quoteTypes";
+import type { Bop, Part, Op, Stock } from "@utils/quoteTypes";
 import { exportQuotationPdf, type QuotationData, type QuotationLineItem } from "@utils/export";
+import { BopModal, type BopModalData } from "@components/BopModal";
 import { QuotePreviewViewer, type QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
 import type { CadImportResult } from "@utils/index";
 import {
@@ -45,8 +48,8 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createCustomer, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
-import type { Customer } from "../db/schema";
+import { createBopCatalog, createCustomer, getAllBopCatalog, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
+import type { BopCatalogItem, Customer } from "../db/schema";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
@@ -195,17 +198,19 @@ function partSubtotal(p: Part, asmQty: number): number {
   return calculatePartSubtotal(p, asmQty, MATERIAL_COSTS, MACHINE_COSTS);
 }
 
-function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; taxPct:number }) {
+function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; taxPct:number }, bops: Array<{ qtyPerAssembly: number; unitCost: number }> = []) {
   // Apply per-batch tooling/inspection only after a part has real configured
-  // cost (material + ops). Otherwise an empty/just-added part would show
-  // overhead totals like ₹672 even when its own material/machining is ₹0.
+  // cost (material + ops) — or there are BOPs to price. Otherwise an
+  // empty/just-added part would show overhead totals like ₹672 even when its
+  // own material/machining is ₹0.
   const probe = calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
-    toolingCost: 0, inspectionCost: 0,
+    toolingCost: 0, inspectionCost: 0, bops,
   });
-  if (probe.partsCost <= 0) return probe;
+  if (probe.partsCost <= 0 && probe.bopCost <= 0) return probe;
   return calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
     toolingCost: TOOLING_BATCH,
     inspectionCost: INSPECTION_BATCH,
+    bops,
   });
 }
 
@@ -334,16 +339,25 @@ function partDescription(part: Part): string {
 function buildQuotationData(args: {
   rfq: { customer: string; customerId: string | null; project: string; rfqRef: string; notes: string };
   parts: Part[];
+  bops: Bop[];
   asmQty: number;
   commercial: { marginPct: number; taxPct: number };
   quoteNumber: string | null;
 }): QuotationData {
   const included = args.parts.filter(p => p.included);
-  const totals = rollup(args.parts, args.asmQty, args.commercial);
+  const totals = rollup(args.parts, args.asmQty, args.commercial, args.bops);
   const grandTotal = Math.round(totals.total);
 
-  // Pro-rata allocation of overheads + margin + tax across parts, so the line
-  // items sum to grandTotal regardless of per-part composition.
+  // BOPs ride the same margin/tax multiplier as parts. Allocate their share of
+  // the grand total proportionally to unit-cost × qty so each BOP's printed
+  // line total reflects the markup, and the remainder is the parts allocation.
+  const bopShareDenom = totals.partsCost + totals.bopCost + totals.tooling + totals.inspection;
+  const bopGrandShare = bopShareDenom > 0 ? totals.bopCost / bopShareDenom : 0;
+  const bopGrand = Math.round(grandTotal * bopGrandShare);
+  const partsGrand = grandTotal - bopGrand;
+
+  // Pro-rata allocation of overheads + margin + tax across parts, so the
+  // parts items sum to partsGrand regardless of per-part composition.
   const partRaw = included.map(part => ({
     part,
     raw:
@@ -357,11 +371,11 @@ function buildQuotationData(args: {
     const qty = partQty(part, args.asmQty);
     const share = rawSum > 0 ? raw / rawSum : 1 / Math.max(1, partRaw.length);
     let allocated = idx === partRaw.length - 1
-      ? grandTotal - partRaw.slice(0, idx).reduce((s, p) => {
+      ? partsGrand - partRaw.slice(0, idx).reduce((s, p) => {
           const sh = rawSum > 0 ? p.raw / rawSum : 1 / Math.max(1, partRaw.length);
-          return s + Math.round(grandTotal * sh);
+          return s + Math.round(partsGrand * sh);
         }, 0)
-      : Math.round(grandTotal * share);
+      : Math.round(partsGrand * share);
     if (!Number.isFinite(allocated) || allocated < 0) allocated = 0;
     const unitPrice = qty > 0 ? allocated / qty : 0;
     const materialLabel = MATERIALS[part.material]?.label || part.material;
@@ -375,6 +389,32 @@ function buildQuotationData(args: {
       totalPrice: allocated,
     };
   });
+
+  const bopList = args.bops.filter(b => b.qtyPerAssembly > 0 && b.unitCost >= 0);
+  const bopRaws = bopList.map(b => Math.max(0, b.unitCost) * Math.max(0, b.qtyPerAssembly) * Math.max(0, args.asmQty));
+  const bopRawSum = bopRaws.reduce((s, v) => s + v, 0);
+  const bopItems: QuotationLineItem[] = bopList.map((bop, idx) => {
+    const qty = Math.max(0, bop.qtyPerAssembly) * Math.max(0, args.asmQty);
+    const share = bopRawSum > 0 ? bopRaws[idx]! / bopRawSum : 1 / Math.max(1, bopList.length);
+    const allocated = idx === bopList.length - 1
+      ? bopGrand - bopRaws.slice(0, idx).reduce((s, r) => {
+          const sh = bopRawSum > 0 ? r / bopRawSum : 1 / Math.max(1, bopList.length);
+          return s + Math.round(bopGrand * sh);
+        }, 0)
+      : Math.round(bopGrand * share);
+    const unitPrice = qty > 0 ? allocated / qty : 0;
+    const descBits = [bop.supplier].filter(Boolean).join(" � ");
+    return {
+      partNumber: bop.name,
+      description: descBits ? `(Brought-out part — ${descBits})` : "(Brought-out part)",
+      materialNote: "Purchased component",
+      qty,
+      unit: "Nos",
+      unitPrice,
+      totalPrice: allocated,
+    };
+  });
+  items.push(...bopItems);
 
   const refLabel = args.quoteNumber || args.rfq.rfqRef || "DRAFT";
   const customerAddress = args.rfq.project ? [args.rfq.project] : ["—"];
@@ -1254,10 +1294,11 @@ function QuoteCustomerModal({
   );
 }
 
-function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
+function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: {
   parts:Part[];
   asmQty:number; setAsmQty:(v:number)=>void;
   commercial:{marginPct:number;taxPct:number}; setCommercial:(v:{marginPct:number;taxPct:number})=>void;
+  bops: Bop[];
 }) {
   const { id } = useParams<{ id: string }>();
   const {
@@ -1275,7 +1316,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   } = useQuoteState();
   const navigate = useNavigate();
   const [tab, setTab] = useState<"inputs"|"notes">("inputs");
-  const r=rollup(parts,asmQty,commercial);
+  const r=rollup(parts,asmQty,commercial,bops);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
   const unit=asmQty>0?r.total/asmQty:0;
   const isSaving = persistenceStatus === "saving";
@@ -1311,7 +1352,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
       return;
     }
     try {
-      const data = buildQuotationData({ rfq, parts, asmQty, commercial, quoteNumber });
+      const data = buildQuotationData({ rfq, parts, bops, asmQty, commercial, quoteNumber });
       const pdf = await exportQuotationPdf(data);
       if (!pdf.ok) throw new Error(pdf.reason);
       await downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
@@ -1415,10 +1456,10 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
    Cost panel (memoized — doesn't depend on selection)
    =========================================================== */
 
-const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
-  parts: Part[]; asmQty: number; commercial: { marginPct: number; taxPct: number };
+const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
+  parts: Part[]; asmQty: number; commercial: { marginPct: number; taxPct: number }; bops: Bop[];
 }) {
-  const r = rollup(parts, asmQty, commercial);
+  const r = rollup(parts, asmQty, commercial, bops);
 
   const cat = { material: 0, machine: 0, setup: 0, finish: 0 };
   parts.forEach(p => {
@@ -1473,9 +1514,11 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
       <div className="margin-legend">{segs.map(s => <span key={s.k}><span className="dot" style={{background:s.c}}/>{s.k}<span className="v">{fmtINR(s.v)}</span></span>)}</div>
       <div className="cost-grid">
         <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtINR(r.partsCost)}</span></div>
-        <div className="cost-row right"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
-        <div className="cost-row left"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
-        <div className="cost-row right"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
+        <div className="cost-row right"><span className="k">BOP subtotal</span><span className="v">{fmtINR(r.bopCost)}</span></div>
+        <div className="cost-row left"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
+        <div className="cost-row right"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
+        <div className="cost-row left"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
+        <div className="cost-row right"><span className="k">Tax</span><span className="v">{fmtINR(r.tax)}</span></div>
         <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtINR(r.subtotal)}</span></div>
         <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtINR(r.total)}</span></div>
       </div>
@@ -1502,12 +1545,304 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
 });
 
 /* ===========================================================
+   BOP section — Brought-Out Parts (purchased items)
+   =========================================================== */
+
+function BopNameCell({
+  bop, catalog, onApply, onRequestCreate,
+}: {
+  bop: Bop;
+  catalog: BopCatalogItem[];
+  /** Replace the row with a catalog snapshot (name + supplier + part# + unit cost). */
+  onApply: (item: BopCatalogItem) => void;
+  /** Open the "create catalog item" modal with the typed name pre-filled. */
+  onRequestCreate: (initialName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(bop.name);
+  const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const committedLabel = bop.catalogId ? bop.name : "";
+  useEffect(() => { setDraft(committedLabel); }, [committedLabel]);
+
+  // Compute the menu's screen position when open so the portal lays it under
+  // the input regardless of the panel's overflow:hidden clipping.
+  useEffect(() => {
+    if (!open || !wrapRef.current) return;
+    const update = () => {
+      const r = wrapRef.current!.getBoundingClientRect();
+      setMenuRect({ left: r.left, top: r.bottom + 4, width: Math.max(r.width, 240) });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
+
+  const typedName = draft.trim();
+  const filtered = useMemo(() => {
+    const q = typedName.toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter(item => {
+      const hay = `${item.name} ${item.supplier ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [catalog, typedName]);
+  const hasExactMatch = typedName.length > 0 && catalog.some(
+    item => item.name.toLowerCase() === typedName.toLowerCase(),
+  );
+  const canCreate = typedName.length > 0 && !hasExactMatch;
+
+  return (
+    <div className="customer-combobox bop-name-cell" ref={wrapRef}>
+      <input
+        className="pname-input"
+        placeholder="Select BOP…"
+        value={draft}
+        autoComplete="off"
+        onFocus={() => setOpen(true)}
+        onChange={event => { setDraft(event.target.value); setOpen(true); }}
+        onBlur={() => {
+          setDraft(committedLabel);
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+      />
+      <button
+        type="button"
+        aria-label="Browse BOP catalog"
+        onMouseDown={event => event.preventDefault()}
+        onClick={() => setOpen(o => !o)}
+      >
+        <ChevronDown size={12} />
+      </button>
+      {open && menuRect && createPortal(
+        <div
+          className="customer-menu bop-portal-menu"
+          role="listbox"
+          aria-label="BOP catalog"
+          style={{
+            position: "fixed",
+            left: menuRect.left,
+            top: menuRect.top,
+            width: menuRect.width,
+          }}
+          onMouseDown={event => event.preventDefault()}
+        >
+          {filtered.length === 0 && !canCreate && (
+            <div className="customer-empty">No matching catalog items. Type a name to add one.</div>
+          )}
+          {filtered.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              role="option"
+              aria-selected={bop.catalogId === item.id}
+              className={bop.catalogId === item.id ? "selected" : undefined}
+              onClick={() => { onApply(item); setOpen(false); }}
+            >
+              <span className="customer-name">
+                {item.name}
+                {item.supplier && (
+                  <span style={{ display: "block", fontSize: 10.5, color: "var(--text-3)", fontWeight: 400 }}>
+                    {item.supplier}
+                  </span>
+                )}
+              </span>
+              <span className="customer-contact mono">{fmtINR(item.unitCost)}</span>
+            </button>
+          ))}
+          {canCreate && (
+            <button
+              type="button"
+              className="create-customer"
+              role="option"
+              aria-selected="false"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => { onRequestCreate(typedName); setOpen(false); }}
+            >
+              <Plus size={13} />
+              <span className="customer-name">{`Add "${typedName}"`}</span>
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+const BopSection = memo(function BopSection({ bops, setBops, asmQty }: {
+  bops: Bop[]; setBops: Dispatch<SetStateAction<Bop[]>>; asmQty: number;
+}) {
+  const [catalog, setCatalog] = useState<BopCatalogItem[]>([]);
+  const [catalogRefreshTick, setCatalogRefreshTick] = useState(0);
+  const [creatingFor, setCreatingFor] = useState<{ rowId: string; initialName: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await getAllBopCatalog();
+        if (!cancelled) setCatalog(rows);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [catalogRefreshTick]);
+  const refreshCatalog = useCallback(() => setCatalogRefreshTick(v => v + 1), []);
+
+  const subtotal = bops.reduce(
+    (s, b) => s + Math.max(0, b.unitCost) * Math.max(0, b.qtyPerAssembly) * Math.max(0, asmQty),
+    0,
+  );
+
+  const update = (id: string, patch: Partial<Bop>) =>
+    setBops(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+  const remove = (id: string) => setBops(prev => prev.filter(b => b.id !== id));
+
+  const addBlank = () => {
+    setBops(prev => [...prev, {
+      id: `qbop-${crypto.randomUUID()}`,
+      catalogId: null,
+      name: "",
+      supplier: "",
+      qtyPerAssembly: 1,
+      unitCost: 0,
+    }]);
+  };
+  /** Snapshot a catalog row into an existing BOP row. */
+  const applyCatalog = (id: string, item: BopCatalogItem) => {
+    update(id, {
+      catalogId: item.id,
+      name: item.name,
+      supplier: item.supplier ?? "",
+      unitCost: item.unitCost,
+    });
+  };
+  const createCatalogItem = async (data: BopModalData) => createBopCatalog({
+    name: (data.name ?? "").trim(),
+    supplier: data.supplier?.trim() || null,
+    unitCost: Number.isFinite(Number(data.unitCost)) ? Number(data.unitCost) : 0,
+    currency: data.currency?.trim() || "INR",
+    notes: data.notes?.trim() || null,
+  });
+
+  return (
+    <div className="panel bop-section">
+      <div className="panel-head bop-head">
+        <div className="bop-head-main">
+          <span className="title"><Package size={13}/> Brought-Out Parts</span>
+          <span className="sub">{bops.length} item{bops.length === 1 ? "" : "s"} · Subtotal {fmtINR(subtotal)}</span>
+        </div>
+        <div className="right">
+          <button className="btn sm" onClick={addBlank}>
+            <Plus size={12}/> Add BOP
+          </button>
+        </div>
+      </div>
+      {bops.length === 0 ? (
+        <div className="empty-state" style={{padding:"30px 18px"}}>
+          <div className="es-ic"><Package size={18}/></div>
+          <div className="es-title">No brought-out parts</div>
+          <div className="es-hint">Search the catalog above, or pick &ldquo;New BOP (ad-hoc)&rdquo; to add a one-off item.</div>
+        </div>
+      ) : (
+        <table className="parts-table bop-table">
+          <colgroup>
+            <col />
+            <col style={{ width: "10%", minWidth: 70 }} />
+            <col style={{ width: "13%", minWidth: 96 }} />
+            <col style={{ width: "16%", minWidth: 100 }} />
+            <col style={{ width: 64 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th className="num">Qty/asm</th>
+              <th className="num">Unit cost</th>
+              <th className="num">Total Cost</th>
+              <th/>
+            </tr>
+          </thead>
+          <tbody>
+            {bops.map(bop => {
+              const line = Math.max(0, bop.unitCost) * Math.max(0, bop.qtyPerAssembly) * Math.max(0, asmQty);
+              return (
+                <tr key={bop.id}>
+                  <td>
+                    <div className="body-cell">
+                      <div>
+                        <BopNameCell
+                          bop={bop}
+                          catalog={catalog}
+                          onApply={item => applyCatalog(bop.id, item)}
+                          onRequestCreate={name => setCreatingFor({ rowId: bop.id, initialName: name })}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="num">
+                    <input
+                      className="qty-input"
+                      type="number" min={0} step={1}
+                      value={bop.qtyPerAssembly}
+                      onChange={e => update(bop.id, { qtyPerAssembly: Math.max(0, Math.trunc(Number(e.target.value) || 0)) })}
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      className="qty-input"
+                      type="number" min={0} step={0.01}
+                      value={bop.unitCost}
+                      onChange={e => update(bop.id, { unitCost: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                  </td>
+                  <td className="num">{fmtINR(line)}</td>
+                  <td>
+                    <button
+                      className="more-btn"
+                      title="Remove"
+                      onClick={() => remove(bop.id)}
+                    >
+                      <Trash2 size={13}/>
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="totals">
+              <td colSpan={3}>BOP subtotal</td>
+              <td className="num">{fmtINR(subtotal)}</td>
+              <td/>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      {creatingFor && (
+        <BopModal
+          item={null}
+          initialName={creatingFor.initialName}
+          onClose={() => setCreatingFor(null)}
+          onSave={async (data: BopModalData) => {
+            const created = await createCatalogItem(data);
+            applyCatalog(creatingFor.rowId, created);
+            setCreatingFor(null);
+            refreshCatalog();
+          }}
+        />
+      )}
+    </div>
+  );
+});
+
+/* ===========================================================
    Quote workspace
    =========================================================== */
 
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
-  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
+  const { parts, setParts, bops, setBops, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
   const [reattachPrompt, setReattachPrompt] = useState<{
     incomingFile: string;
     existingFile: string;
@@ -1690,11 +2025,13 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
                 showAll={showAll}/>
             : <QuotePreview onOpenViewer={onOpenViewer}/>)}
         </div>
-        <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial}/>
+        <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial} bops={bops}/>
       </div>
       <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} onAddPart={addManualPart} searchQuery={searchQuery}/>
 
-      <CostPanel parts={parts} asmQty={asmQty} commercial={commercial}/>
+      <BopSection bops={bops} setBops={setBops} asmQty={asmQty}/>
+
+      <CostPanel parts={parts} asmQty={asmQty} commercial={commercial} bops={bops}/>
     </div>
     {reattachPrompt && (
       <div className="modal-overlay" onClick={() => {
@@ -1818,3 +2155,4 @@ export function QuoteDetailPage() {
     </div>
   );
 }
+

@@ -26,6 +26,7 @@ export type QuoteRollup = {
   tooling: number;
   inspection: number;
   partsCost: number;
+  bopCost: number;
   subtotal: number;
   margin: number;
   tax: number;
@@ -172,17 +173,27 @@ export function calculateQuoteRollup(
   commercial: CommercialTerms,
   materials: MaterialCatalog,
   machines: MachineCatalog,
-  options: { toolingCost?: number; inspectionCost?: number; currency?: string } = {},
+  options: {
+    toolingCost?: number;
+    inspectionCost?: number;
+    currency?: string;
+    bops?: Array<{ qtyPerAssembly: number; unitCost: number }>;
+  } = {},
 ): QuoteRollup {
   const included = parts.filter(part => part.included);
   const materialCost = included.reduce((sum, part) => sum + partMaterialCost(part, assemblyQuantity, materials), 0);
   const setupCost = included.reduce((sum, part) => sum + partSetupCost(part, machines), 0);
   const machineCost = included.reduce((sum, part) => sum + partMachineCost(part, assemblyQuantity, machines), 0);
   const finishingCost = included.reduce((sum, part) => sum + partFinishingCost(part, assemblyQuantity), 0);
+  const bopCost = (options.bops ?? []).reduce((sum, bop) => {
+    const qty = Math.max(0, Math.trunc(finite(bop.qtyPerAssembly)));
+    const cost = Math.max(0, finite(bop.unitCost));
+    return sum + cost * qty * Math.max(0, assemblyQuantity);
+  }, 0);
   const tooling = options.toolingCost ?? DEFAULT_TOOLING_BATCH;
   const inspection = options.inspectionCost ?? DEFAULT_INSPECTION_BATCH;
   const partsCost = materialCost + setupCost + machineCost + finishingCost;
-  const subtotal = partsCost + tooling + inspection;
+  const subtotal = partsCost + bopCost + tooling + inspection;
   const margin = subtotal * (finite(commercial.marginPct) / 100);
   const tax = (subtotal + margin) * (finite(commercial.taxPct) / 100);
   const total = subtotal + margin + tax;
@@ -198,6 +209,7 @@ export function calculateQuoteRollup(
     tooling,
     inspection,
     partsCost,
+    bopCost,
     subtotal,
     margin,
     tax,

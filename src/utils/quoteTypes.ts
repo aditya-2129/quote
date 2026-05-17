@@ -7,6 +7,16 @@ export type Op = {
   rateOverride?: number | null;
 };
 export type Stock = { shape: string; dims: Record<string, number> };
+export type Bop = {
+  id: string;
+  /** Optional reference back to the reusable catalog row. */
+  catalogId: string | null;
+  name: string;
+  supplier: string;
+  qtyPerAssembly: number;
+  unitCost: number;
+  notes?: string;
+};
 export type Part = {
   id: string; name: string; color: string;
   material: string; perAssembly: number; mass: number; finishing: number; included: boolean; stocked?: boolean;

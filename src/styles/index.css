@@ -491,6 +491,36 @@ a { text-decoration: none; color: inherit; }
 }
 .panel-head .right { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
+.bop-head {
+  flex-wrap: nowrap;
+}
+.bop-head-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.bop-head-main .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bop-head-main .title svg {
+  flex: 0 0 auto;
+}
+.bop-head-main .sub {
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .bop-head {
+    flex-wrap: wrap;
+  }
+  .bop-head-main {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+}
+
 .eyebrow {
   font-size: 10.5px;
   font-weight: 600;
@@ -851,11 +881,14 @@ a { text-decoration: none; color: inherit; }
     position: static;
   }
   .quote-grid .parts-panel { grid-row: 3; grid-column: 1; }
-  .quote-grid .cost-panel  { grid-row: 4; grid-column: 1; }
+  .quote-grid .bop-section { grid-row: 4; grid-column: 1; }
+  .quote-grid .cost-panel  { grid-row: 5; grid-column: 1; }
 }
 
 .parts-panel   { grid-row: 1; grid-column: 1; min-width: 0; overflow-x: auto; }
-.cost-panel    { grid-row: 2; grid-column: 1; }
+.bop-section   { grid-row: 2; grid-column: 1; align-self: start; }
+.bop-section .customer-menu { /* dropdown escapes the panel — z-index keeps it above siblings */ z-index: 50; }
+.cost-panel    { grid-row: 3; grid-column: 1; }
 
 /* Right column wraps the compact preview + RFQ rail in a single sticky cell.
    Stacking them inside one cell (rather than across grid rows) means the RFQ
@@ -1557,6 +1590,57 @@ a { text-decoration: none; color: inherit; }
 }
 .customer-empty { padding: 8px; color: var(--text-3); font-size: 12px; }
 
+/* BOP picker reuses .customer-combobox / .customer-menu styles but lives in a
+   panel-head right slot — give it a fixed width and a roomier menu since the
+   catalog can run dozens of rows. */
+/* Inline BOP name combobox styled like the operation row's machine select:
+   panel-2 fill, soft border, 5px radius, chevron tucked on the right. */
+.bop-name-cell { position: relative; width: 100%; max-width: 220px; }
+.parts-table .body-cell .bop-name-cell .pname-input {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  margin: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-1);
+  outline: 0;
+  width: 100%;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.parts-table .body-cell .bop-name-cell .pname-input:hover { border-color: var(--border-strong); }
+.parts-table .body-cell .bop-name-cell .pname-input:focus { border-color: var(--accent); background: var(--panel); }
+.bop-name-cell > button {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.bop-name-cell > button:hover { background: var(--panel-3); color: var(--text-1); }
+.bop-name-cell .customer-menu { max-height: 280px; min-width: 240px; }
+
+/* BOP rows reuse .parts-table styling. Text-style inputs need to look like the
+   part-name input (transparent until focus). */
+.parts-table .qty-input.bop-text {
+  text-align: left;
+  font-family: inherit;
+  max-width: none;
+  width: 100%;
+}
+/* Portal-mounted menu — float on top of everything. */
+.bop-portal-menu { z-index: 100; }
 .sub-head { display: flex; align-items: center; margin: 4px 14px 0; padding-top: 12px; border-top: 1px dashed var(--divider); }
 .sub-head .eyebrow { color: var(--text-3); }
 
@@ -1659,6 +1743,10 @@ a { text-decoration: none; color: inherit; }
 .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--divider); color: var(--text-1); }
 .data-table tbody tr:hover { background: var(--panel-2); }
 .quotes-list-panel {
+  flex: 1;
+  min-height: 0;
+}
+.bops-list-panel {
   flex: 1;
   min-height: 0;
 }

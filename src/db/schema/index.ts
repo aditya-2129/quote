@@ -1,4 +1,5 @@
 export * from "./app_settings";
+export * from "./bop_catalog";
 export * from "./customers";
 export * from "./machines";
 export * from "./materials";
@@ -7,6 +8,7 @@ export * from "./part_geometry";
 export * from "./part_operations";
 export * from "./part_stock";
 export * from "./parts";
+export * from "./quote_bops";
 export * from "./quote_cad_sources";
 export * from "./quotes";
 export * from "./recent_files";

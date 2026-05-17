@@ -2,8 +2,10 @@ import {
   createOperation,
   createPart,
   createQuote,
+  createQuoteBop,
   createRfq,
   deleteQuote,
+  deleteQuoteBop,
   deleteRfq,
   deleteOperation,
   deleteOperationsForPart,
@@ -19,12 +21,14 @@ import {
   getPartsByQuote,
   getPartStock,
   getQuoteById,
+  getQuoteBopsByQuote,
   getQuoteCadSource,
   getRootQuotes,
   getRfqById,
   updateOperation,
   updatePart,
   updateQuote,
+  updateQuoteBop,
   updateRfq,
   upsertPartGeometry,
   upsertPartStock,
@@ -38,7 +42,7 @@ import type {
   Rfq,
   UnitSystem,
 } from "./schema";
-import type { Op, Part, Stock } from "../utils/quoteTypes";
+import type { Bop, Op, Part, Stock } from "../utils/quoteTypes";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
@@ -87,6 +91,7 @@ export type QuoteWorkflowDraft = {
   rfqId?: string | null;
   rfq: QuoteWorkflowRfqDraft;
   parts: QuoteWorkflowPartDraft[];
+  bops?: Bop[];
   asmQty: number;
   commercial: QuoteWorkflowCommercialDraft;
   currency?: string;
@@ -104,6 +109,7 @@ export type QuoteWorkflowDraft = {
 export type LoadedQuoteWorkflow = QuoteWorkflowDraft & {
   quoteId: string;
   rfqId: string | null;
+  bops: Bop[];
   records: {
     rfq: Rfq | null;
     quote: Quote;
@@ -286,6 +292,8 @@ async function savePartChildren(
   quoteId: string,
   sortOrder: number,
   fallbackFileName: string,
+  validMachineIds: Set<string>,
+  validMaterialIds: Set<string>,
 ): Promise<void> {
   const existingParts = await getPartsByQuote(quoteId);
   const existing = existingParts.find((row) => row.id === part.id);
@@ -293,7 +301,7 @@ async function savePartChildren(
     id: part.id,
     quoteId,
     name: part.name,
-    materialId: part.material || null,
+    materialId: part.material && validMaterialIds.has(part.material) ? part.material : null,
     colorHex: part.color,
     perAssembly: Math.max(1, Math.trunc(finiteNumber(part.perAssembly, 1))),
     massKg: finiteNumber(part.mass),
@@ -349,7 +357,7 @@ async function savePartChildren(
     const operationData = {
       id: operation.id,
       partId: part.id,
-      machineId: operation.machine || null,
+      machineId: operation.machine && validMachineIds.has(operation.machine) ? operation.machine : null,
       setupMin: finiteNumber(operation.setupMin),
       cycleMin: finiteNumber(operation.cycleMin),
       notes: operationNotes(operation),
@@ -490,15 +498,45 @@ export async function saveQuoteWorkflow(
   }
 
   const fallbackFileName = draft.fileName ?? `${title}.step`;
+  const validMachineIds = new Set(machines.map((m) => m.id));
+  const validMaterialIds = new Set(materials.map((m) => m.id));
   for (let i = 0; i < normalized.parts.length; i++) {
     const part = normalized.parts[i]!;
     try {
-      await savePartChildren(part, quote.id, i, fallbackFileName);
+      await savePartChildren(part, quote.id, i, fallbackFileName, validMachineIds, validMaterialIds);
     } catch (error) {
       throw new Error(
         `Failed to save part "${part.name}" (${part.id}): ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
       );
+    }
+  }
+
+  if (draft.bops !== undefined) {
+    const existingBops = await getQuoteBopsByQuote(quote.id);
+    const existingIds = new Set(existingBops.map((row) => row.id));
+    const incomingIds = new Set(draft.bops.map((row) => row.id));
+    for (const row of existingBops) {
+      if (!incomingIds.has(row.id)) await deleteQuoteBop(row.id);
+    }
+    for (let i = 0; i < draft.bops.length; i++) {
+      const bop = draft.bops[i]!;
+      const payload = {
+        id: bop.id,
+        quoteId: quote.id,
+        catalogId: bop.catalogId ?? null,
+        name: bop.name,
+        supplier: bop.supplier || null,
+        qtyPerAssembly: Math.max(1, Math.trunc(finiteNumber(bop.qtyPerAssembly, 1))),
+        unitCost: finiteNumber(bop.unitCost),
+        notes: bop.notes ? bop.notes : null,
+        sortOrder: i,
+      };
+      if (existingIds.has(bop.id)) {
+        await updateQuoteBop(bop.id, payload);
+      } else {
+        await createQuoteBop(payload);
+      }
     }
   }
 
@@ -539,6 +577,17 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     parts.push(part);
   }
 
+  const bopRows = await getQuoteBopsByQuote(quote.id);
+  const bops: Bop[] = bopRows.map((row) => ({
+    id: row.id,
+    catalogId: row.catalogId ?? null,
+    name: row.name,
+    supplier: row.supplier ?? "",
+    qtyPerAssembly: row.qtyPerAssembly,
+    unitCost: row.unitCost,
+    notes: row.notes ?? undefined,
+  }));
+
   const cadSourceRow = await getQuoteCadSource(quote.id);
   const cadSource: QuoteWorkflowCadSource | null = cadSourceRow
     ? { bytes: base64ToBytes(cadSourceRow.fileBytesBase64), fileName: cadSourceRow.fileName }
@@ -555,6 +604,7 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
       notes: rfqMeta?.notes ?? "",
     },
     parts,
+    bops,
     asmQty: quote.assemblyQuantity,
     commercial: {
       marginPct: quote.marginPercent,

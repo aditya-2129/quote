@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import type { Part } from "@utils/quoteTypes";
+import type { Bop, Part } from "@utils/quoteTypes";
 import { useCad } from "./CadContext";
 import {
   loadQuoteWorkflow,
@@ -19,6 +19,8 @@ const defaultRfq: Rfq = { customer: "", customerId: null, project: "", rfqRef: "
 interface QuoteStateCtx {
   parts: Part[];
   setParts: Dispatch<SetStateAction<Part[]>>;
+  bops: Bop[];
+  setBops: Dispatch<SetStateAction<Bop[]>>;
   selectedId: string | null;
   setSelectedId: Dispatch<SetStateAction<string | null>>;
   asmQty: number;
@@ -66,6 +68,15 @@ function draftSignature(draft: QuoteWorkflowDraft): string {
       taxPct: draft.commercial.taxPct,
       discountPct: draft.commercial.discountPct ?? 0,
     },
+    bops: (draft.bops ?? []).map(bop => ({
+      id: bop.id,
+      catalogId: bop.catalogId ?? null,
+      name: bop.name,
+      supplier: bop.supplier ?? "",
+      qtyPerAssembly: bop.qtyPerAssembly,
+      unitCost: bop.unitCost,
+      notes: bop.notes ?? "",
+    })),
     parts: draft.parts.map(part => ({
       id: part.id,
       name: part.name,
@@ -111,6 +122,7 @@ function draftSignature(draft: QuoteWorkflowDraft): string {
 
 function hasDraftContent(draft: QuoteWorkflowDraft): boolean {
   return draft.parts.length > 0
+    || (draft.bops?.length ?? 0) > 0
     || Boolean(draft.rfq.customer?.trim())
     || Boolean(draft.rfq.customerId)
     || Boolean(draft.rfq.project.trim())
@@ -127,6 +139,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   const pendingHandoffRef = useRef(cadCtx.pendingHandoff);
   pendingHandoffRef.current = cadCtx.pendingHandoff;
   const [parts, setParts] = useState<Part[]>([]);
+  const [bops, setBops] = useState<Bop[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [asmQty, setAsmQty] = useState(25);
   const [commercial, setCommercial] = useState(defaultCommercial);
@@ -170,11 +183,12 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       asmQty,
       commercial,
       parts,
+      bops,
       toolingCost: 244,
       inspectionCost: 326,
       projectNameSource,
     };
-  }, [asmQty, commercial, parts, projectNameSource, quoteId, rfq, rfqId]);
+  }, [asmQty, bops, commercial, parts, projectNameSource, quoteId, rfq, rfqId]);
 
   const applySnapshot = useCallback((snapshot: LoadedQuoteWorkflow) => {
     setQuoteId(snapshot.quoteId);
@@ -199,6 +213,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       taxPct: snapshot.commercial.taxPct,
     });
     setParts(snapshot.parts);
+    setBops(snapshot.bops ?? []);
     setSelectedId(snapshot.parts[0]?.id ?? null);
     setLastSavedAt(snapshot.records.quote.updatedAt ?? null);
     lastSavedSignatureRef.current = draftSignature(snapshot);
@@ -293,6 +308,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       asmQty,
       commercial,
       parts,
+      bops,
       toolingCost: 244,
       inspectionCost: 326,
       cadSource,
@@ -320,7 +336,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     })();
     saveInFlightRef.current = promise;
     return promise;
-  }, [applySavedIdentity, applySnapshot, asmQty, commercial, getCadBytes, parts, projectNameSource, quoteId, rfq, rfqId]);
+  }, [applySavedIdentity, applySnapshot, asmQty, bops, commercial, getCadBytes, parts, projectNameSource, quoteId, rfq, rfqId]);
 
   useEffect(() => {
     const draft: QuoteWorkflowDraft = {
@@ -330,6 +346,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       asmQty,
       commercial,
       parts,
+      bops,
       toolingCost: 244,
       inspectionCost: 326,
       projectNameSource,
@@ -345,7 +362,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       });
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [asmQty, commercial, parts, persistenceStatus, projectNameSource, quoteId, rfq, rfqId, saveQuote]);
+  }, [asmQty, bops, commercial, parts, persistenceStatus, projectNameSource, quoteId, rfq, rfqId, saveQuote]);
 
   const sendQuote = useCallback(async () => {
     // Flush pending edits first so the sent quote reflects what the user sees.
@@ -360,7 +377,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   const clearPersistenceError = useCallback(() => setPersistenceError(null), []);
 
   return (
-    <QuoteStateContext.Provider value={{ parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, clearPersistenceError }}>
+    <QuoteStateContext.Provider value={{ parts, setParts, bops, setBops, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, clearPersistenceError }}>
       {children}
     </QuoteStateContext.Provider>
   );

@@ -39,6 +39,12 @@ pub fn run() {
       sql: include_str!("../migrations/0006_drop_dfm_issues.sql"),
       kind: MigrationKind::Up,
     },
+    Migration {
+      version: 7,
+      description: "bop",
+      sql: include_str!("../migrations/0007_bop.sql"),
+      kind: MigrationKind::Up,
+    },
   ];
 
   tauri::Builder::default()

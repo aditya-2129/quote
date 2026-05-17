@@ -9,6 +9,7 @@ import {
   QuoteDetailPage,
   PartsPage,
   CustomersPage,
+  BopsPage,
   AnalyticsPage,
   MaterialsPage,
   MachinesPage,
@@ -38,6 +39,7 @@ function App() {
           </Route>
           <Route path="/parts" element={<PartsPage />} />
           <Route path="/customers" element={<CustomersPage />} />
+          <Route path="/bops" element={<BopsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/materials" element={<MaterialsPage />} />
           <Route path="/machines" element={<MachinesPage />} />

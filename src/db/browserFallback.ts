@@ -1,7 +1,9 @@
 import type {
+  BopCatalogItem,
   Customer,
   Machine,
   Material,
+  NewBopCatalogItem,
   NewCustomer,
   NewMachine,
   NewMaterial,
@@ -10,6 +12,7 @@ import type {
   NewPartOperation,
   NewPartStock,
   NewQuote,
+  NewQuoteBop,
   NewQuoteCadSource,
   NewRfq,
   Part,
@@ -17,6 +20,7 @@ import type {
   PartOperation,
   PartStock,
   Quote,
+  QuoteBop,
   QuoteCadSource,
   QuoteStatus,
   Rfq,
@@ -24,6 +28,7 @@ import type {
 } from "./schema";
 
 type BrowserDb = {
+  bopCatalog: BopCatalogItem[];
   customers: Customer[];
   machines: Machine[];
   materials: Material[];
@@ -31,6 +36,7 @@ type BrowserDb = {
   partOperations: PartOperation[];
   parts: Part[];
   partStock: PartStock[];
+  quoteBops: QuoteBop[];
   quoteCadSources: QuoteCadSource[];
   quotes: Quote[];
   rfqs: Rfq[];
@@ -119,6 +125,11 @@ const initialDb: BrowserDb = {
     },
   ],
   quoteCadSources: [],
+  bopCatalog: [
+    { id: "bop-m6-bolt", name: "M6 x 20 socket head bolt", supplier: "Unbrako", unitCost: 7.5, currency: "INR", notes: null, createdAt: seedDate, updatedAt: seedDate },
+    { id: "bop-6204-bearing", name: "Deep groove bearing 6204-2RS", supplier: "SKF", unitCost: 185, currency: "INR", notes: null, createdAt: seedDate, updatedAt: seedDate },
+  ],
+  quoteBops: [],
 };
 
 function reviveDates<T>(value: T): T {
@@ -173,6 +184,7 @@ function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
   }
   db.parts = db.parts.filter(row => row.quoteId !== quoteId);
   db.quoteCadSources = db.quoteCadSources.filter(row => row.quoteId !== quoteId);
+  db.quoteBops = db.quoteBops.filter(row => row.quoteId !== quoteId);
 }
 
 function deletePartsForQuoteRows(db: BrowserDb, quoteId: string): void {
@@ -589,6 +601,80 @@ export const browserDb = {
     const db = readDb();
     db.quotes = db.quotes.filter(row => row.id !== id);
     deleteQuoteRows(db, id);
+    writeDb(db);
+  },
+
+  getAllBopCatalog(): BopCatalogItem[] {
+    return readDb().bopCatalog.slice().sort(byName);
+  },
+  getBopCatalogById(id: string): BopCatalogItem | null {
+    return readDb().bopCatalog.find(row => row.id === id) ?? null;
+  },
+  createBopCatalog(data: Omit<NewBopCatalogItem, "id" | "createdAt" | "updatedAt">): BopCatalogItem {
+    const db = readDb();
+    const row: BopCatalogItem = {
+      supplier: null, unitCost: 0, currency: "INR", notes: null,
+      ...data,
+      id: newId("bop"),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    db.bopCatalog.push(row);
+    writeDb(db);
+    return row;
+  },
+  updateBopCatalog(id: string, data: Partial<Omit<NewBopCatalogItem, "id" | "createdAt" | "updatedAt">>): BopCatalogItem | null {
+    const db = readDb();
+    const index = db.bopCatalog.findIndex(row => row.id === id);
+    if (index < 0) return null;
+    db.bopCatalog[index] = { ...db.bopCatalog[index]!, ...data, updatedAt: now() };
+    writeDb(db);
+    return db.bopCatalog[index]!;
+  },
+  deleteBopCatalog(id: string): void {
+    const db = readDb();
+    db.bopCatalog = db.bopCatalog.filter(row => row.id !== id);
+    // Catalog deletion is set-null on linked quote rows — preserve snapshot.
+    db.quoteBops = db.quoteBops.map(row => row.catalogId === id ? { ...row, catalogId: null } : row);
+    writeDb(db);
+  },
+
+  getQuoteBopsByQuote(quoteId: string): QuoteBop[] {
+    return readDb().quoteBops.filter(row => row.quoteId === quoteId).sort(bySortOrder);
+  },
+  getQuoteBopById(id: string): QuoteBop | null {
+    return readDb().quoteBops.find(row => row.id === id) ?? null;
+  },
+  createQuoteBop(data: Omit<NewQuoteBop, "createdAt" | "updatedAt"> & { id?: string }): QuoteBop {
+    const db = readDb();
+    const row: QuoteBop = {
+      catalogId: null, supplier: null,
+      qtyPerAssembly: 1, unitCost: 0, notes: null, sortOrder: 0,
+      ...data,
+      id: data.id ?? newId("qbop"),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    db.quoteBops.push(row);
+    writeDb(db);
+    return row;
+  },
+  updateQuoteBop(id: string, data: Partial<Omit<NewQuoteBop, "id" | "createdAt" | "updatedAt">>): QuoteBop | null {
+    const db = readDb();
+    const index = db.quoteBops.findIndex(row => row.id === id);
+    if (index < 0) return null;
+    db.quoteBops[index] = { ...db.quoteBops[index]!, ...data, updatedAt: now() };
+    writeDb(db);
+    return db.quoteBops[index]!;
+  },
+  deleteQuoteBop(id: string): void {
+    const db = readDb();
+    db.quoteBops = db.quoteBops.filter(row => row.id !== id);
+    writeDb(db);
+  },
+  deleteQuoteBopsForQuote(quoteId: string): void {
+    const db = readDb();
+    db.quoteBops = db.quoteBops.filter(row => row.quoteId !== quoteId);
     writeDb(db);
   },
 };
