@@ -1517,6 +1517,73 @@ a { text-decoration: none; color: inherit; }
 .field input.num { font-family: var(--font-mono); }
 .field .suffix { position: relative; }
 .field .suffix .unit { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-family: var(--font-mono); font-size: 11px; color: var(--text-3); pointer-events: none; }
+.customer-combobox { position: relative; }
+.customer-combobox input { padding-right: 32px; }
+.customer-combobox > button {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+}
+.customer-combobox > button:hover { background: var(--panel-3); color: var(--text-1); }
+.customer-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+.customer-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  text-align: left;
+}
+.customer-menu button:hover,
+.customer-menu button.selected { background: var(--accent-soft); }
+.customer-menu button.create-customer {
+  margin-top: 3px;
+  border-top: 1px solid var(--divider);
+  border-radius: 0 0 var(--radius-xs) var(--radius-xs);
+  color: var(--accent-text);
+}
+.customer-menu button.create-customer .customer-name { color: var(--accent-text); }
+.customer-menu button:disabled { opacity: 0.62; cursor: wait; }
+.customer-menu .customer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+.customer-menu .customer-contact {
+  flex-shrink: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.customer-empty { padding: 8px; color: var(--text-3); font-size: 12px; }
 
 .sub-head { display: flex; align-items: center; margin: 4px 14px 0; padding-top: 12px; border-top: 1px dashed var(--divider); }
 .sub-head .eyebrow { color: var(--text-3); }

@@ -10,11 +10,11 @@ import {
 } from "../db/quoteWorkflowService";
 import type { ProjectNameSource } from "../db/schema";
 
-export type Rfq = { customer: string; project: string; rfqRef: string; notes: string };
+export type Rfq = { customer: string; customerId: string | null; project: string; rfqRef: string; notes: string };
 export type PersistenceStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
 const defaultCommercial = { marginPct: 18, taxPct: 0 };
-const defaultRfq: Rfq = { customer: "", project: "", rfqRef: "", notes: "" };
+const defaultRfq: Rfq = { customer: "", customerId: null, project: "", rfqRef: "", notes: "" };
 
 interface QuoteStateCtx {
   parts: Part[];
@@ -123,6 +123,7 @@ function draftSignature(draft: QuoteWorkflowDraft): string {
 function hasDraftContent(draft: QuoteWorkflowDraft): boolean {
   return draft.parts.length > 0
     || Boolean(draft.rfq.customer?.trim())
+    || Boolean(draft.rfq.customerId)
     || Boolean(draft.rfq.project.trim())
     || Boolean(draft.rfq.rfqRef?.trim())
     || Boolean(draft.rfq.notes?.trim());
@@ -195,6 +196,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     // to 'user' just because we're loading a saved value.
     setRfqState({
       customer: snapshot.rfq.customer ?? "",
+      customerId: snapshot.rfq.customerId ?? null,
       project: snapshot.rfq.project,
       rfqRef: snapshot.rfq.rfqRef ?? "",
       notes: snapshot.rfq.notes ?? "",

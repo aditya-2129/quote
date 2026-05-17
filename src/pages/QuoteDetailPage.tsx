@@ -6,6 +6,7 @@ import {
   useId,
   useMemo,
   useRef,
+  type FormEvent,
 } from "react";
 import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
@@ -47,7 +48,8 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { dismissDfmIssue, getAllMaterials, getAllMachines } from "../db/queries";
+import { createCustomer, dismissDfmIssue, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
+import type { Customer } from "../db/schema";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
@@ -378,7 +380,7 @@ function partDescription(part: Part): string {
 }
 
 function buildQuotationData(args: {
-  rfq: { customer: string; project: string; rfqRef: string; notes: string };
+  rfq: { customer: string; customerId: string | null; project: string; rfqRef: string; notes: string };
   parts: Part[];
   asmQty: number;
   commercial: { marginPct: number; taxPct: number };
@@ -1029,6 +1031,361 @@ function Field({ label, value, unit, type="text", onChange, grid }: { label:stri
   );
 }
 
+function customerOptionLabel(customer: Customer): string {
+  const contact = customer.company && customer.company !== customer.name ? customer.name : null;
+  return [customer.company || customer.name, contact].filter(Boolean).join(" - ");
+}
+
+function customerDisplayName(customer: Customer): string {
+  return customer.company || customer.name;
+}
+
+function CustomerField({
+  value,
+  customerId,
+  onChange,
+}: {
+  value: string;
+  customerId: string | null;
+  onChange: (customer: { customer: string; customerId: string | null }) => void;
+}) {
+  const selectId = useId();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState<string | null>(null);
+  const selectedCustomer = customerId ? customers.find(customer => customer.id === customerId) : null;
+  const typedName = value.trim();
+  const normalizedValue = value.trim().toLocaleLowerCase();
+  const filteredCustomers = useMemo(() => {
+    if (!normalizedValue) return customers;
+    return customers.filter(customer =>
+      customerOptionLabel(customer).toLocaleLowerCase().includes(normalizedValue) ||
+      customer.name.toLocaleLowerCase().includes(normalizedValue) ||
+      customer.company?.toLocaleLowerCase().includes(normalizedValue) ||
+      customer.email?.toLocaleLowerCase().includes(normalizedValue) ||
+      customer.phone?.toLocaleLowerCase().includes(normalizedValue)
+    );
+  }, [customers, normalizedValue]);
+  const hasExactMatch = typedName.length > 0 && customers.some(customer =>
+    customerOptionLabel(customer).toLocaleLowerCase() === normalizedValue ||
+    customer.name.toLocaleLowerCase() === normalizedValue ||
+    customer.company?.toLocaleLowerCase() === normalizedValue
+  );
+  const canCreateCustomer = typedName.length > 0 && !hasExactMatch;
+
+  const applyCustomerText = useCallback((text: string) => {
+    const trimmed = text.trim();
+    const normalized = trimmed.toLocaleLowerCase();
+    const match = customers.find(customer =>
+      customerOptionLabel(customer).toLocaleLowerCase() === normalized ||
+      customer.name.toLocaleLowerCase() === normalized ||
+      customer.company?.toLocaleLowerCase() === normalized ||
+      customer.email?.toLocaleLowerCase() === normalized
+    );
+    onChange(match
+      ? { customer: customerDisplayName(match), customerId: match.id }
+      : { customer: text, customerId: null });
+  }, [customers, onChange]);
+
+  const selectCustomer = useCallback((customer: Customer) => {
+    onChange({ customer: customerDisplayName(customer), customerId: customer.id });
+    setIsOpen(false);
+  }, [onChange]);
+
+  const handleCustomerCreated = useCallback((customer: Customer) => {
+    setCustomers(rows => [...rows, customer].sort((a, b) => customerOptionLabel(a).localeCompare(customerOptionLabel(b))));
+    onChange({ customer: customerDisplayName(customer), customerId: customer.id });
+    setNewCustomerName(null);
+    setIsOpen(false);
+  }, [onChange]);
+
+  useEffect(() => {
+    let alive = true;
+    getAllCustomers()
+      .then(rows => {
+        if (!alive) return;
+        setCustomers(rows);
+        setLoadError(null);
+      })
+      .catch(error => {
+        if (!alive) return;
+        setLoadError(error instanceof Error ? error.message : "Unable to load customers.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (customerId || !value.trim() || customers.length === 0) return;
+    const normalized = value.trim().toLocaleLowerCase();
+    const match = customers.find(customer =>
+      customer.name.toLocaleLowerCase() === normalized ||
+      customer.company?.toLocaleLowerCase() === normalized
+    );
+    if (match) onChange({ customer: customerDisplayName(match), customerId: match.id });
+  }, [customerId, customers, onChange, value]);
+
+  if (loadError) {
+    return (
+      <Field
+        label="Customer"
+        value={value}
+        grid="1/-1"
+        onChange={next => onChange({ customer: String(next), customerId: null })}
+      />
+    );
+  }
+
+  return (
+    <div className="field" style={{ gridColumn: "1/-1" }}>
+      <label htmlFor={selectId}>Customer</label>
+      <div className="customer-combobox">
+        <input
+          id={selectId}
+          name={selectId}
+          placeholder="Search customers"
+          value={value}
+          autoComplete="off"
+          onFocus={() => setIsOpen(true)}
+          onChange={event => {
+            onChange({ customer: event.target.value, customerId: null });
+            setIsOpen(true);
+          }}
+          onBlur={event => {
+            applyCustomerText(event.target.value);
+            window.setTimeout(() => setIsOpen(false), 120);
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Show customers"
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => setIsOpen(open => !open)}
+        >
+          <ChevronDown size={14} />
+        </button>
+        {isOpen && (
+          <div className="customer-menu" role="listbox" aria-label="Customers">
+            {filteredCustomers.map(customer => (
+            <button
+              key={customer.id}
+              type="button"
+              className={selectedCustomer?.id === customer.id ? "selected" : undefined}
+              role="option"
+              aria-selected={selectedCustomer?.id === customer.id}
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => selectCustomer(customer)}
+            >
+              <span className="customer-name">{customer.company || customer.name}</span>
+              {customer.company && customer.company !== customer.name && (
+                <span className="customer-contact">{customer.name}</span>
+              )}
+            </button>
+            ))}
+            {canCreateCustomer && (
+              <button
+                type="button"
+                className="create-customer"
+                role="option"
+                aria-selected="false"
+                onMouseDown={event => event.preventDefault()}
+                onClick={() => {
+                  setNewCustomerName(typedName);
+                  setIsOpen(false);
+                }}
+              >
+                <Plus size={13} />
+                <span className="customer-name">{`Add "${typedName}"`}</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {newCustomerName !== null && (
+        <QuoteCustomerModal
+          initialName={newCustomerName}
+          onClose={() => setNewCustomerName(null)}
+          onCreated={handleCustomerCreated}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuoteCustomerModal({
+  initialName,
+  onClose,
+  onCreated,
+}: {
+  initialName: string;
+  onClose: () => void;
+  onCreated: (customer: Customer) => void;
+}) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formData, setFormData] = useState({
+    name: initialName,
+    company: initialName,
+    email: "",
+    phone: "",
+    address: "",
+    notes: "",
+  });
+
+  const set = (patch: Partial<typeof formData>) => setFormData(prev => ({ ...prev, ...patch }));
+  const clearErr = (key: string) => setErrors(prev => ({ ...prev, [key]: "" }));
+
+  const validate = (): Record<string, string> => {
+    const e: Record<string, string> = {};
+    if (!formData.name.trim()) e.name = "Name is required";
+    if (!formData.company.trim()) e.company = "Company is required";
+    if (!formData.email.trim()) e.email = "Email is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) e.email = "Invalid email address";
+    if (!formData.phone.trim()) e.phone = "Phone is required";
+    else if (!/^\d{10}$/.test(formData.phone)) e.phone = "Must be exactly 10 digits";
+    return e;
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextErrors = validate();
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setSaveError("");
+    setIsSaving(true);
+    try {
+      const customer = await createCustomer({
+        name: formData.name.trim(),
+        company: formData.company.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        address: formData.address.trim() || null,
+        notes: formData.notes.trim() || null,
+      });
+      onCreated(customer);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to create customer.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={event => event.stopPropagation()}>
+        <div className="modal-head">
+          <div className="title">New Customer</div>
+          <button className="close" onClick={onClose} disabled={isSaving}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} noValidate autoComplete="off" data-lpignore="true" data-1p-ignore="true">
+          <div className="modal-body">
+            {saveError && (
+              <div className="error-banner">
+                <TriangleAlert size={14} />
+                <span>{saveError}</span>
+                <button type="button" onClick={() => setSaveError("")}><X size={12} /></button>
+              </div>
+            )}
+            <div className="form-grid">
+              <div className="form-group span-2">
+                <label>Name *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  onChange={event => { set({ name: event.target.value }); clearErr("name"); }}
+                  placeholder="e.g. Rahul Sharma"
+                  disabled={isSaving}
+                  style={errors.name ? { borderColor: "var(--danger)" } : undefined}
+                />
+                {errors.name && <span className="field-error">{errors.name}</span>}
+              </div>
+              <div className="form-group span-2">
+                <label>Company *</label>
+                <input
+                  type="text"
+                  value={formData.company}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  onChange={event => { set({ company: event.target.value }); clearErr("company"); }}
+                  placeholder="e.g. Acme Industries"
+                  disabled={isSaving}
+                  style={errors.company ? { borderColor: "var(--danger)" } : undefined}
+                />
+                {errors.company && <span className="field-error">{errors.company}</span>}
+              </div>
+              <div className="form-group">
+                <label>Email *</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  onChange={event => { set({ email: event.target.value }); clearErr("email"); }}
+                  placeholder="e.g. rahul@acme.com"
+                  disabled={isSaving}
+                  style={errors.email ? { borderColor: "var(--danger)" } : undefined}
+                />
+                {errors.email && <span className="field-error">{errors.email}</span>}
+              </div>
+              <div className="form-group">
+                <label>Phone *</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  onChange={event => { set({ phone: event.target.value.replace(/\D/g, "").slice(0, 10) }); clearErr("phone"); }}
+                  placeholder="10-digit mobile number"
+                  maxLength={10}
+                  disabled={isSaving}
+                  style={errors.phone ? { borderColor: "var(--danger)" } : undefined}
+                />
+                {errors.phone && <span className="field-error">{errors.phone}</span>}
+              </div>
+              <div className="form-group span-2">
+                <label>Address</label>
+                <textarea
+                  value={formData.address}
+                  onChange={event => set({ address: event.target.value })}
+                  rows={2}
+                  placeholder="Street, City, State, PIN"
+                  disabled={isSaving}
+                />
+              </div>
+              <div className="form-group span-2">
+                <label>Notes</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={event => set({ notes: event.target.value })}
+                  rows={2}
+                  placeholder="Optional notes..."
+                  disabled={isSaving}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="modal-foot">
+            <button type="button" className="btn sm" onClick={onClose} disabled={isSaving}>Cancel</button>
+            <button type="submit" className="btn primary sm" disabled={isSaving}>
+              {isSaving ? "Saving..." : "Create Customer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   parts:Part[];
   asmQty:number; setAsmQty:(v:number)=>void;
@@ -1115,7 +1472,11 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
         {tab==="inputs"&&(
           <>
 <div className="rfq-fields">
-              <Field label="Customer" value={rfq.customer} grid="1/-1" onChange={v=>setRfq({...rfq, customer:String(v)})}/>
+              <CustomerField
+                value={rfq.customer}
+                customerId={rfq.customerId}
+                onChange={customer => setRfq({ ...rfq, ...customer })}
+              />
               <Field label="Project" value={rfq.project} onChange={v=>setRfq({...rfq, project:String(v)})}/>
               <Field label="RFQ ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
             </div>
