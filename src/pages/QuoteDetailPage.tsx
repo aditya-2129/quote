@@ -3,6 +3,7 @@ import {
   useCallback,
   useState,
   useEffect,
+  useId,
   useMemo,
   useRef,
 } from "react";
@@ -10,6 +11,8 @@ import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
 import type { Part, Op, Stock } from "@utils/quoteTypes";
+import type { QuoteCalculation } from "../types";
+import { exportQuotationPdf } from "@utils/export";
 import { QuotePreviewViewer, type QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
 import type { CadImportResult } from "@utils/index";
 import {
@@ -46,7 +49,28 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getAllMaterials, getAllMachines } from "../db/queries";
+import { dismissDfmIssue, getAllMaterials, getAllMachines, logQuoteEvent } from "../db/queries";
+import {
+  buildMachineCatalog,
+  buildMaterialCatalog,
+  buildQuantityBreaks,
+  calculateQuoteRollup,
+  effectivePartRate,
+  materialRate,
+  operationCost as calculateOperationCost,
+  operationMinutes as calculateOperationMinutes,
+  operationRate as calculateOperationRate,
+  partFinishingCost as calculatePartFinishingCost,
+  partMachineCost as calculatePartMachineCost,
+  partMaterialCost as calculatePartMaterialCost,
+  partNetMassKg as calculatePartNetMassKg,
+  partQuantity,
+  partSetupCost as calculatePartSetupCost,
+  partSubtotal as calculatePartSubtotal,
+  stockMassKg as calculateStockMassKg,
+  type MachineCatalog,
+  type MaterialCatalog,
+} from "../utils/quoteCosting";
 
 /* ===========================================================
    Reference data — loaded from DB (Material library / Machines & rates)
@@ -54,10 +78,36 @@ import { getAllMaterials, getAllMachines } from "../db/queries";
 
 type MaterialMeta = { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number>; isPurchased: boolean };
 type MachineMeta  = { label: string; rate: number; short: string };
+type DfmUiIssue = {
+  id: string;
+  partId: string;
+  severity: "error" | "warn" | "info";
+  title: string;
+  desc: string;
+  impact: number;
+  suggest: string;
+  actionable: boolean;
+  isDismissed?: boolean;
+};
+type PartWithDfm = Part & {
+  dfmIssues?: Array<{
+    id?: string;
+    partId: string;
+    severity: "error" | "warn" | "info";
+    title: string;
+    description?: string | null;
+    impactCost?: number;
+    suggestion?: string | null;
+    isActionable?: boolean;
+    isDismissed?: boolean;
+  }>;
+};
 
 // Mutable maps populated from the DB at app start. Cost utilities read from these.
 const MATERIALS: Record<string, MaterialMeta> = {};
 const MACHINES:  Record<string, MachineMeta>  = {};
+const MATERIAL_COSTS: MaterialCatalog = {};
+const MACHINE_COSTS: MachineCatalog = {};
 
 const MATERIAL_PALETTE = ["#8d959c", "#bfc7d1", "#c69f5a", "#a8b0b8", "#dcd9d2", "#7d92aa", "#a89b7a", "#a3b5a8"];
 function colorForMaterial(id: string): string {
@@ -87,6 +137,10 @@ async function loadCatalog(): Promise<void> {
     const [mats, machs] = await Promise.all([getAllMaterials(true), getAllMachines(true)]);
     for (const k of Object.keys(MATERIALS)) delete MATERIALS[k];
     for (const k of Object.keys(MACHINES))  delete MACHINES[k];
+    for (const k of Object.keys(MATERIAL_COSTS)) delete MATERIAL_COSTS[k];
+    for (const k of Object.keys(MACHINE_COSTS)) delete MACHINE_COSTS[k];
+    Object.assign(MATERIAL_COSTS, buildMaterialCatalog(mats));
+    Object.assign(MACHINE_COSTS, buildMachineCatalog(machs));
     for (const m of mats) {
       MATERIALS[m.id] = {
         label: m.name,
@@ -131,7 +185,7 @@ const opId = () => `op-${++__opSeq}`;
 const TOOLING_BATCH = 244;
 const INSPECTION_BATCH = 326;
 
-const DFM_ISSUES = [
+const DFM_ISSUES: DfmUiIssue[] = [
   { id:"dfm-1", partId:"body-cap", severity:"error", title:"Wall thickness 0.8 mm",         desc:"Below 1.0 mm minimum for steel machining. Risk of deflection during finishing.",               impact:90,  suggest:"Increase wall to ≥ 1.0 mm or accept reduced batch yield", actionable:true },
   { id:"dfm-2", partId:"body-cap", severity:"warn",  title:"Internal corner radius 0.5 mm",  desc:"Below tool minimum for 3-axis mill. Adds tool-change time or forces 5-axis path.",            impact:120, suggest:"Relax to R1.0 mm or switch to 5-axis", actionable:true },
   { id:"dfm-3", partId:"body-mid", severity:"warn",  title:"Deep pocket · 18 × 12 × 32 mm", desc:"Aspect ratio > 2.5 requires long-reach tooling. Adds cycle time.",                            impact:60,  suggest:"Confirm pocket depth — drawing rev C tolerance", actionable:false },
@@ -142,39 +196,23 @@ const DFM_ISSUES = [
    Costing utilities
    =========================================================== */
 
-function stockVolumeMm3(stock: Stock): number {
-  const { shape, dims } = stock;
-  switch (shape) {
-    case "rect": return (dims.L||0)*(dims.W||0)*(dims.H||0);
-    case "round": { const ro=(dims.D||0)/2, ri=(dims.ID||0)/2; return Math.PI*(ro*ro-ri*ri)*(dims.L||0); }
-    case "hex": return (Math.sqrt(3)/2)*Math.pow(dims.AF||0,2)*(dims.L||0);
-    default: return 0;
-  }
-}
-
 function getMaterialRate(materialId: string, stockShape?: string): number {
-  const mat = MATERIALS[materialId];
-  if (!mat) return 0;
-  if (stockShape && mat.rates[stockShape] !== undefined) return mat.rates[stockShape];
-  return Object.values(mat.rates)[0] ?? 0;
+  return materialRate(MATERIAL_COSTS, materialId, stockShape);
 }
 
 // Effective per-kg rate for a part: per-quote override wins, otherwise falls back to the material library.
 function partRate(p: Part): number {
-  if (p.materialRateOverride != null && !isNaN(p.materialRateOverride)) return p.materialRateOverride;
-  return getMaterialRate(p.material, p.stock?.shape);
+  return effectivePartRate(p, MATERIAL_COSTS);
 }
 
 function stockMassKg(stock: Stock|null, materialId: string): number {
-  if (!stock) return 0;
-  return stockVolumeMm3(stock)*1e-9*(MATERIALS[materialId]?.density??0);
+  return calculateStockMassKg(stock, materialId, MATERIAL_COSTS);
 }
 
 // Net (machined) part mass — derived from CAD volume × current material density.
 // Falls back to a stored `mass` value if no geometry is available (e.g. manually added parts).
 function partNetMassKg(p: Part): number {
-  if (p.netVolumeMm3 != null) return p.netVolumeMm3 * 1e-9 * (MATERIALS[p.material]?.density ?? 0);
-  return p.mass || 0;
+  return calculatePartNetMassKg(p, MATERIAL_COSTS);
 }
 
 function stockUtilization(p: Part): number|null {
@@ -184,40 +222,32 @@ function stockUtilization(p: Part): number|null {
   return sm>0 ? nm/sm : null;
 }
 
-const partQty = (p: Part, asmQty: number) => p.perAssembly*asmQty;
+const partQty = (p: Part, asmQty: number) => partQuantity(p, asmQty);
 
 function opRate(op: Op): number {
-  if (op.rateOverride != null && !isNaN(op.rateOverride)) return op.rateOverride;
-  return MACHINES[op.machine]?.rate ?? 0;
+  return calculateOperationRate(op, MACHINE_COSTS);
 }
 function opCost(op: Op, qty: number): number {
-  const rate = opRate(op);
-  return (op.setupMin/60)*rate+(op.cycleMin/60)*rate*qty;
+  return calculateOperationCost(op, qty, MACHINE_COSTS);
 }
-function opMinutes(op: Op, qty: number): number { return op.setupMin+op.cycleMin*qty; }
+function opMinutes(op: Op, qty: number): number { return calculateOperationMinutes(op, qty); }
 
 function partMachineCost(p: Part, asmQty: number): number {
-  const qty = partQty(p, asmQty);
-  return (p.operations||[]).reduce((a,op)=>a+opCost(op,qty),0);
+  return calculatePartSetupCost(p, MACHINE_COSTS) + calculatePartMachineCost(p, asmQty, MACHINE_COSTS);
 }
 function partMaterialCost(p: Part, asmQty: number): number {
-  const matRate = partRate(p);
-  const mass = (p.stocked||!p.stock) ? partNetMassKg(p) : stockMassKg(p.stock, p.material);
-  return mass*matRate*partQty(p,asmQty);
+  return calculatePartMaterialCost(p, asmQty, MATERIAL_COSTS);
 }
-function partFinishCost(p: Part, asmQty: number): number { return p.finishing*partQty(p,asmQty); }
+function partFinishCost(p: Part, asmQty: number): number { return calculatePartFinishingCost(p, asmQty); }
 function partSubtotal(p: Part, asmQty: number): number {
-  if (!p.included) return 0;
-  return partMaterialCost(p,asmQty)+partMachineCost(p,asmQty)+partFinishCost(p,asmQty);
+  return calculatePartSubtotal(p, asmQty, MATERIAL_COSTS, MACHINE_COSTS);
 }
 
 function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; taxPct:number }) {
-  const partsCost = parts.reduce((a,p)=>a+partSubtotal(p,asmQty),0);
-  const subtotal = partsCost+TOOLING_BATCH+INSPECTION_BATCH;
-  const margin = subtotal*(commercial.marginPct/100);
-  const tax = (subtotal+margin)*(commercial.taxPct/100);
-  const total = subtotal+margin+tax;
-  return { partsCost, tooling:TOOLING_BATCH, inspection:INSPECTION_BATCH, subtotal, margin, tax, total };
+  return calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
+    toolingCost: TOOLING_BATCH,
+    inspectionCost: INSPECTION_BATCH,
+  });
 }
 
 function fmtINR(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -242,6 +272,104 @@ function addBusinessDays(start: Date, n: number): Date {
   return d;
 }
 function fmtShipDate(d: Date) { return d.toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short"}); }
+
+function downloadBytes(fileName: string, bytes: Uint8Array, mimeType: string) {
+  const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportCalculationFromQuote(args: {
+  rfq: { customer: string; project: string; rfqRef: string; notes: string };
+  parts: Part[];
+  asmQty: number;
+  commercial: { marginPct: number; taxPct: number };
+}): QuoteCalculation {
+  const included = args.parts.filter(p => p.included);
+  const firstPart = included[0] ?? args.parts[0];
+  const totals = rollup(args.parts, args.asmQty, args.commercial);
+  const partRows = included.map(p => `${p.name} x ${partQty(p, args.asmQty)}`).join(", ");
+  const partName = included.length > 1 ? `${included.length} quoted parts` : firstPart?.name ?? "Quoted parts";
+  const materialId = firstPart?.material || "material";
+  const material = MATERIALS[materialId];
+  const geometry = (firstPart as Part & { geometry?: { bboxXMm?: number; bboxYMm?: number; bboxZMm?: number; volumeMm3?: number; surfaceAreaMm2?: number; faceCount?: number; edgeCount?: number; vertexCount?: number } }).geometry;
+  const volumeMm3 = geometry?.volumeMm3 ?? firstPart?.netVolumeMm3 ?? 0;
+  const surfaceAreaMm2 = geometry?.surfaceAreaMm2 ?? 0;
+
+  return {
+    id: args.rfq.rfqRef || crypto.randomUUID(),
+    quoteNumber: args.rfq.rfqRef || "DRAFT-QUOTE",
+    customerName: args.rfq.customer,
+    projectName: args.rfq.project || "Untitled quote",
+    partName,
+    quantity: args.asmQty,
+    currency: "INR",
+    material: {
+      id: materialId,
+      name: material?.label ?? materialId,
+      densityKgPerM3: material?.density ?? 0,
+      costPerKg: getMaterialRate(materialId, firstPart?.stock?.shape),
+      currency: "INR",
+    },
+    geometry: {
+      fileName: args.rfq.project || partName,
+      unitSystem: "metric",
+      boundingBoxMm: {
+        x: geometry?.bboxXMm ?? 0,
+        y: geometry?.bboxYMm ?? 0,
+        z: geometry?.bboxZMm ?? 0,
+      },
+      volumeMm3,
+      surfaceAreaMm2,
+      volumeCm3: volumeMm3 / 1000,
+      surfaceAreaCm2: surfaceAreaMm2 / 100,
+      boundingBoxVolumeMm3: (geometry?.bboxXMm ?? 0) * (geometry?.bboxYMm ?? 0) * (geometry?.bboxZMm ?? 0),
+      materialUtilizationPercent: firstPart ? (stockUtilization(firstPart) ?? 0) * 100 : 0,
+      longestDimensionMm: Math.max(geometry?.bboxXMm ?? 0, geometry?.bboxYMm ?? 0, geometry?.bboxZMm ?? 0),
+      shortestDimensionMm: Math.min(geometry?.bboxXMm ?? 0, geometry?.bboxYMm ?? 0, geometry?.bboxZMm ?? 0),
+      faceCount: geometry?.faceCount ?? 0,
+      edgeCount: geometry?.edgeCount ?? 0,
+      vertexCount: geometry?.vertexCount ?? 0,
+    },
+    massKg: firstPart ? partNetMassKg(firstPart) : 0,
+    process: {
+      setupCost: totals.partsCost,
+      machineRatePerHour: 0,
+      machineTimeMinutes: 0,
+      laborRatePerHour: 0,
+      laborTimeMinutes: 0,
+      finishingCost: 0,
+      inspectionCost: totals.inspection,
+      toolingCost: totals.tooling,
+    },
+    taxPercent: args.commercial.taxPct,
+    marginPercent: args.commercial.marginPct,
+    discountPercent: 0,
+    costs: {
+      materialCost: included.reduce((sum, part) => sum + partMaterialCost(part, args.asmQty), 0),
+      setupCost: 0,
+      machineCost: included.reduce((sum, part) => sum + partMachineCost(part, args.asmQty), 0),
+      laborCost: 0,
+      finishingCost: included.reduce((sum, part) => sum + partFinishCost(part, args.asmQty), 0),
+      inspectionCost: totals.inspection,
+      toolingCost: totals.tooling,
+      subtotal: totals.subtotal,
+      discount: 0,
+      margin: totals.margin,
+      tax: totals.tax,
+      total: totals.total,
+      unitPrice: totals.unitPrice,
+    },
+    createdAt: new Date().toISOString(),
+    notes: [args.rfq.notes, partRows ? `Parts: ${partRows}` : ""].filter(Boolean).join("\n\n"),
+  };
+}
 
 function computeLeadTime(parts: Part[], asmQty: number) {
   let totalMachineMin = 0;
@@ -401,6 +529,7 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
         <span className="sp-eyebrow">Material</span>
         <select
           className="sp-mat-select"
+          aria-label="Material"
           value={part.material}
           onChange={e => updateMaterial(e.target.value)}
         >
@@ -415,6 +544,7 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
             type="number"
             min="0"
             step="0.01"
+            aria-label="Material rate per kg"
             value={Number.isFinite(rate) ? rate : 0}
             onChange={e => updateRate(+e.target.value || 0)}
           />
@@ -436,13 +566,13 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
       </div>
       <div className={`sp-dims dims-${cfg.dims.length}`}>
         {cfg.dims.map(k => (
-          <div className="sp-field" key={k}>
-            <label>{k}</label>
+          <label className="sp-field" key={k}>
+            <span>{k}</span>
             <div className="suffix">
-              <input type="number" min="0" value={stock.dims?.[k] ?? 0} onChange={e => updateDim(k, +e.target.value || 0)} />
+              <input type="number" min="0" aria-label={`Stock dimension ${k} (mm)`} value={stock.dims?.[k] ?? 0} onChange={e => updateDim(k, +e.target.value || 0)} />
               <span className="unit">mm</span>
             </div>
-          </div>
+          </label>
         ))}
       </div>
       <div className="sp-foot">
@@ -493,27 +623,27 @@ function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onCh
               <span className="op-idx">{i + 1}</span>
             </span>
             <div className="op-col-machine">
-              <select value={op.machine} onChange={e => update(op.id, { machine: e.target.value, rateOverride: null })}>
+              <select aria-label="Machine" value={op.machine} onChange={e => update(op.id, { machine: e.target.value, rateOverride: null })}>
                 {Object.entries(MACHINES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </div>
             <span className="op-col-spacer" />
             <div className="op-col-rate">
               <div className={`op-num-input ${isRateOverride ? "override" : ""}`} title={isRateOverride ? "Custom rate for this quote — click ↺ to reset" : "Click to override rate for this quote"}>
-                <input type="number" min="0" step="1" value={rate} onChange={e => update(op.id, { rateOverride: +e.target.value || 0 })} />
+                <input type="number" min="0" step="1" aria-label="Machine rate per hour" value={rate} onChange={e => update(op.id, { rateOverride: +e.target.value || 0 })} />
                 <span className="unit">/h</span>
                 {isRateOverride && <button className="op-rate-reset" onClick={() => update(op.id, { rateOverride: null })} title="Reset to library rate">↺</button>}
               </div>
             </div>
             <div className="op-col-setup">
               <div className="op-num-input">
-                <input type="number" min="0" step="0.5" value={op.setupMin} onChange={e => update(op.id, { setupMin: +e.target.value || 0 })} />
+                <input type="number" min="0" step="0.5" aria-label="Setup minutes" value={op.setupMin} onChange={e => update(op.id, { setupMin: +e.target.value || 0 })} />
                 <span className="unit">min</span>
               </div>
             </div>
             <div className="op-col-cycle">
               <div className="op-num-input">
-                <input type="number" min="0" step="0.1" value={op.cycleMin} onChange={e => update(op.id, { cycleMin: +e.target.value || 0 })} />
+                <input type="number" min="0" step="0.1" aria-label="Cycle minutes" value={op.cycleMin} onChange={e => update(op.id, { cycleMin: +e.target.value || 0 })} />
                 <span className="unit">min</span>
               </div>
             </div>
@@ -556,7 +686,7 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
   const machineTags = ops.slice(0, 3).map(o => MACHINES[o.machine]?.short || o.machine);
   return (
     <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""} ${isExpanded?"row-expanded":""}`} onClick={() => onSelect(p.id)}>
-      <td className="include-cell"><input type="checkbox" checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
+      <td className="include-cell"><input type="checkbox" aria-label={`Include ${p.name} in quote`} checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
       <td><div className="body-cell"><span className="swatch" style={{background:p.color}}/><div style={{minWidth:0}}>
         <div className="pname">{p.name}</div>
         <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
@@ -564,7 +694,7 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
         </div>
       </div></div></td>
       <td>{(() => { const m = MATERIALS[p.material]; return m ? <span className="material-chip"><span className="swatch" style={{background:m.hex}}/>{m.label}</span> : <span className="muted" style={{fontSize:11}}>—</span>; })()}</td>
-      <td className="num"><input type="number" className="qty-input" value={p.perAssembly} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{perAssembly:+e.target.value||0})}/></td>
+      <td className="num"><input type="number" className="qty-input" aria-label={`Per-assembly quantity for ${p.name}`} value={p.perAssembly} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{perAssembly:+e.target.value||0})}/></td>
       <td className="num muted">{qty}</td>
       <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
       <td className="num">{p.included?fmtINR(sub):"—"}</td>
@@ -727,8 +857,27 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
    DFM panel
    =========================================================== */
 
-const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty }: { parts:Part[]; onSelectPart:(id:string)=>void; asmQty:number }) {
-  const dynamicIssues: typeof DFM_ISSUES = [];
+const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty, onAcceptIssue }: {
+  parts:Part[];
+  onSelectPart:(id:string)=>void;
+  asmQty:number;
+  onAcceptIssue:(issue:DfmUiIssue)=>void;
+}) {
+  const dismissedIds = new Set(
+    parts.flatMap(p => ((p as PartWithDfm).dfmIssues ?? []).filter(i => i.isDismissed).map(i => i.id)).filter(Boolean) as string[],
+  );
+  const savedIssues: DfmUiIssue[] = parts.flatMap(p => ((p as PartWithDfm).dfmIssues ?? []).map(i => ({
+    id: i.id ?? `${p.id}-${i.title}`,
+    partId: i.partId || p.id,
+    severity: i.severity,
+    title: i.title,
+    desc: i.description ?? "",
+    impact: i.impactCost ?? 0,
+    suggest: i.suggestion ?? "",
+    actionable: i.isActionable ?? false,
+    isDismissed: i.isDismissed,
+  }))).filter(i => !i.isDismissed);
+  const dynamicIssues: DfmUiIssue[] = [];
   parts.forEach(p=>{
     if (!p.included||p.stocked||!p.stock) return;
     const util=stockUtilization(p);
@@ -737,7 +886,12 @@ const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty }: { parts
       dynamicIssues.push({id:`dfm-util-${p.id}`,partId:p.id,severity:util<0.15?"error":"warn",title:`Low stock utilization · ${(util*100).toFixed(0)}%`,desc:`Chip waste ${waste.toFixed(3)} kg per part. Consider smaller stock or near-net shape.`,impact,suggest:"Resize stock to net + 4 mm finishing allowance",actionable:true});
     }
   });
-  const allIssues=[...dynamicIssues,...DFM_ISSUES];
+  const savedIds = new Set(savedIssues.map(i => i.id));
+  const partIds = new Set(parts.map(p => p.id));
+  const seededIssues = DFM_ISSUES.filter(i => partIds.has(i.partId));
+  const allIssues=[...savedIssues,...dynamicIssues,...seededIssues]
+    .filter(i => !dismissedIds.has(i.id))
+    .filter((i, index, rows) => savedIds.has(i.id) || rows.findIndex(row => row.id === i.id) === index);
   const totalImpact=allIssues.reduce((a,i)=>a+(i.impact||0),0);
   const counts=allIssues.reduce((a,i)=>({...a,[i.severity]:(a[i.severity as keyof typeof a]||0)+1}),{error:0,warn:0,info:0});
   const partName=(id:string)=>parts.find(p=>p.id===id)?.name||id;
@@ -770,7 +924,7 @@ const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty }: { parts
                   <div className="dfm-suggest"><Lightbulb size={11}/> {i.suggest}</div>
                 </div>
                 <div className="dfm-impact"><span className="label">Cost impact</span>+{fmtINR0(i.impact)}</div>
-                <div className="dfm-actions">{i.actionable&&<button className="btn sm">Apply fix</button>}<button className="btn sm ghost">Accept</button></div>
+                <div className="dfm-actions">{i.actionable&&<button className="btn sm">Apply fix</button>}<button className="btn sm ghost" onClick={()=>onAcceptIssue(i)}>Accept</button></div>
               </div>
             );
           })}
@@ -810,7 +964,7 @@ function LeadTimeBar({ lead }: { lead:ReturnType<typeof computeLeadTime> }) {
 const QTY_BREAKS=[1,10,25,100,250];
 
 function QuantityBreaks({ parts, asmQty, setAsmQty, commercial }: { parts:Part[]; asmQty:number; setAsmQty:(v:number)=>void; commercial:{marginPct:number;taxPct:number} }) {
-  const breaks=QTY_BREAKS.map(q=>{ const r=rollup(parts,q,commercial); return {q,total:r.total,unit:q>0?r.total/q:0}; });
+  const breaks=buildQuantityBreaks(parts, commercial, MATERIAL_COSTS, MACHINE_COSTS, QTY_BREAKS);
   const baseUnit=breaks[0].unit;
   const currentUnit=asmQty>0?rollup(parts,asmQty,commercial).total/asmQty:0;
   const bestSavings=currentUnit>0?((baseUnit-currentUnit)/baseUnit)*100:0;
@@ -838,15 +992,38 @@ function QuantityBreaks({ parts, asmQty, setAsmQty, commercial }: { parts:Part[]
    =========================================================== */
 
 function Field({ label, value, unit, type="text", onChange, grid }: { label:string; value:string|number; unit?:string; type?:string; onChange?:(v:string|number)=>void; grid?:string }) {
+  const inputId = useId();
   return (
     <div className="field" style={grid?{gridColumn:grid}:undefined}>
-      <label>{label}</label>
+      <label htmlFor={inputId}>{label}</label>
       <div className={unit?"suffix":undefined}>
-        <input type={type} value={value} onChange={e=>onChange?.(type==="number"?+e.target.value||0:e.target.value)} className={type==="number"?"num":undefined} style={unit?{paddingRight:38}:undefined}/>
+        <input id={inputId} name={inputId} type={type} value={value} onChange={e=>onChange?.(type==="number"?+e.target.value||0:e.target.value)} className={type==="number"?"num":undefined} style={unit?{paddingRight:38}:undefined}/>
         {unit&&<span className="unit">{unit}</span>}
       </div>
     </div>
   );
+}
+
+function eventLabel(eventType: string): string {
+  switch (eventType) {
+    case "created": return "Quote created";
+    case "updated": return "Quote updated";
+    case "dfm_resolved": return "DFM issue accepted";
+    case "note_added": return "Note saved";
+    case "revision_created": return "Revision created";
+    case "status_changed": return "Status changed";
+    case "sent": return "Quote sent";
+    case "viewed": return "Quote viewed";
+    default: return eventType.replace(/_/g, " ");
+  }
+}
+
+function formatEventMeta(payload: Record<string, unknown> | null): string {
+  if (!payload) return "";
+  if (typeof payload.title === "string") return payload.title;
+  if (typeof payload.partCount === "number") return `${payload.partCount} parts`;
+  if (typeof payload.from === "string" && typeof payload.to === "string") return `${payload.from} to ${payload.to}`;
+  return "";
 }
 
 function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
@@ -855,12 +1032,43 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   commercial:{marginPct:number;taxPct:number}; setCommercial:(v:{marginPct:number;taxPct:number})=>void;
 }) {
   const { id } = useParams<{ id: string }>();
-  const { rfq, setRfq } = useQuoteState();
+  const {
+    rfq,
+    setRfq,
+    quoteEvents,
+    persistenceStatus,
+    persistenceError,
+    lastSavedAt,
+    saveQuote,
+    clearPersistenceError,
+  } = useQuoteState();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"inputs"|"history"|"notes">("inputs");
   const r=rollup(parts,asmQty,commercial);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
   const lead=computeLeadTime(parts,asmQty);
   const unit=asmQty>0?r.total/asmQty:0;
+  const isSaving = persistenceStatus === "saving";
+  const savedText = lastSavedAt ? `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
+
+  async function handleSave() {
+    try {
+      const savedId = await saveQuote();
+      if (!id || id !== savedId) navigate(`/quotes/${savedId}`, { replace: true });
+    } catch {
+      // Error state is owned by QuoteStateContext and rendered below.
+    }
+  }
+
+  async function handleExportPdf() {
+    try {
+      const pdf = await exportQuotationPdf(exportCalculationFromQuote({ rfq, parts, asmQty, commercial }));
+      if (!pdf.ok) throw new Error(pdf.reason);
+      downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to export PDF.");
+    }
+  }
 
   return (
     <div className="panel rfq-panel">
@@ -889,7 +1097,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
             <div className="asm-qty-row" style={{marginTop:10}}>
               <span className="lbl">Assembly qty</span>
               <span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{totalQty} parts total</span>
-              <input type="number" min="1" value={asmQty} onChange={e=>setAsmQty(Math.max(1,+e.target.value||1))}/>
+              <input type="number" min="1" aria-label="Assembly quantity" value={asmQty} onChange={e=>setAsmQty(Math.max(1,+e.target.value||1))}/>
             </div>
             <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial}/>
             <LeadTimeBar lead={lead}/>
@@ -898,36 +1106,45 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
         )}
         {tab==="history"&&(
           <div className="recents">
-            {[
-              {name:"Pump Manifold v3 · current draft",num:"Q-026-014 · rev C",amt:fmtINR(r.total),date:"Now"},
-              {name:"Pump Manifold v3 · rev B",num:"Q-026-014 · rev B",amt:"₹4,64,000.00",date:"May 12"},
-              {name:"Pump Manifold v2",num:"Q-025-204",amt:"₹4,21,000.00",date:"Apr 28"},
-            ].map((r2,i)=>(
-              <div key={r2.num} className="recent" style={i===0?{background:"var(--accent-soft)"}:undefined}>
-                <div className="name">{r2.name}</div><div className="amt">{r2.amt}</div>
-                <div className="meta">{r2.num}</div><div className="date">{r2.date}</div>
+            {quoteEvents.length>0 ? quoteEvents.map((event,i)=>(
+              <div key={event.id} className="recent" style={i===0?{background:"var(--accent-soft)"}:undefined}>
+                <div className="name">{eventLabel(event.eventType)}</div><div className="amt">{fmtINR(r.total)}</div>
+                <div className="meta">{formatEventMeta(event.payload)}</div><div className="date">{new Date(event.createdAt).toLocaleDateString()}</div>
               </div>
-            ))}
+            )) : <div className="dfm-empty">No saved history yet.</div>}
           </div>
         )}
         {tab==="notes"&&(
           <div style={{padding:14}}>
-            <textarea rows={10} defaultValue={"• Confirm finish: bead-blast or anodized clear.\n• 6 mm thread depth in cap — verify drawing rev C.\n• Lead-time 12 working days from PO."} style={{width:"100%",padding:10,resize:"none",background:"var(--panel-2)",border:"1px solid var(--border)",borderRadius:6,fontFamily:"var(--font-sans)",fontSize:12.5,color:"var(--text-1)",outline:0}}/>
+            <textarea rows={10} aria-label="Quote notes" value={rfq.notes} onChange={e=>setRfq({...rfq, notes:e.target.value})} style={{width:"100%",padding:10,resize:"none",background:"var(--panel-2)",border:"1px solid var(--border)",borderRadius:6,fontFamily:"var(--font-sans)",fontSize:12.5,color:"var(--text-1)",outline:0}}/>
           </div>
         )}
       </div>
+      {persistenceError && (
+        <div className="quote-error-banner">
+          <TriangleAlert size={14}/>
+          <span>{persistenceError}</span>
+          <button type="button" onClick={clearPersistenceError} title="Dismiss error"><X size={14}/></button>
+        </div>
+      )}
       <div className="total-panel big">
         <div className="total-row">
           <span className="label">Quotation total</span>
-          <span className="chip success"><span className="dot"/>Within target</span>
+          <span className={`chip ${persistenceStatus === "error" ? "" : "success"}`}>
+            <span className="dot"/>
+            {isSaving ? "Saving..." : persistenceStatus === "saved" ? savedText : "Draft"}
+          </span>
         </div>
         <div className="duo">
           <div className="cell"><div className="label">Total</div><div className="value">{fmtINR(r.total)}</div><div className="sub">{asmQty} assemblies</div></div>
           <div className="cell right"><div className="label">Per unit</div><div className="value">{fmtINR(unit)}</div><div className="sub">incl. {commercial.marginPct}% margin</div></div>
         </div>
         <div className="total-actions">
-          <button className="btn block primary"><FileDown size={14}/> Export PDF</button>
-          <button className="btn block"><Save size={14}/> Save</button>
+          <button className="btn block primary" onClick={handleExportPdf}><FileDown size={14}/> Export PDF</button>
+          <button className="btn block" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? <Clock size={14}/> : persistenceStatus === "saved" ? <Check size={14}/> : <Save size={14}/>}
+            {isSaving ? "Saving" : persistenceStatus === "saved" ? "Saved" : "Save"}
+          </button>
           <button className="btn" title="Send"><Send size={14}/></button>
         </div>
       </div>
@@ -1053,7 +1270,7 @@ function ConfirmReplaceModal({ existingCount, incomingCount, fileName, onReplace
 
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
-  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial } = useQuoteState();
+  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, quoteId, saveQuote } = useQuoteState();
   const [showAll, setShowAll] = useState(false);
   const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() => {
@@ -1081,10 +1298,43 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
       const imported = cadResultToParts(consumeHandoff()!);
       setParts(imported);
       setSelectedId(imported[0]?.id ?? null);
+      void saveQuote({ parts: imported }).catch(() => {
+        // Persistence errors are rendered by the quote state owner.
+      });
     } else {
       setConfirmHandoff({ incomingCount: cad.meshes.length, fileName: cad.fileName });
     }
   }, [pendingHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const acceptDfmIssue = useCallback((issue: DfmUiIssue) => {
+    setParts(current => current.map(part => {
+      if (part.id !== issue.partId) return part;
+      const partWithDfm = part as PartWithDfm;
+      const existing = partWithDfm.dfmIssues ?? [];
+      const nextIssues = existing.some(row => row.id === issue.id)
+        ? existing.map(row => row.id === issue.id ? { ...row, isDismissed: true } : row)
+        : [...existing, {
+            id: issue.id,
+            partId: issue.partId,
+            severity: issue.severity,
+            title: issue.title,
+            description: issue.desc,
+            impactCost: issue.impact,
+            suggestion: issue.suggest,
+            isActionable: issue.actionable,
+            isDismissed: true,
+          }];
+      return { ...part, dfmIssues: nextIssues } as Part;
+    }));
+    if (quoteId) {
+      void dismissDfmIssue(issue.id);
+      void logQuoteEvent({
+        quoteId,
+        eventType: "dfm_resolved",
+        payload: { issueId: issue.id, partId: issue.partId, title: issue.title },
+      });
+    }
+  }, [quoteId, setParts]);
 
   return (
     <>
@@ -1152,7 +1402,7 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
         <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial}/>
       </div>
       <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} searchQuery={searchQuery}/>
-      <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty}/>
+      <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty} onAcceptIssue={acceptDfmIssue}/>
 
       <CostPanel parts={parts} asmQty={asmQty} commercial={commercial}/>
     </div>
@@ -1165,6 +1415,9 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
           const imported = cadResultToParts(consumeHandoff()!);
           setParts(imported);
           setSelectedId(imported[0]?.id ?? null);
+          void saveQuote({ parts: imported }).catch(() => {
+            // Persistence errors are rendered by the quote state owner.
+          });
           setConfirmHandoff(null);
         }}
         onCancel={() => {
@@ -1191,7 +1444,7 @@ export function QuoteDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { cad } = useCad();
-  const { rfq } = useQuoteState();
+  const { rfq, quoteId, persistenceStatus, persistenceError, loadQuote, clearPersistenceError } = useQuoteState();
   const searchQuery = "";
 
   useEffect(() => {
@@ -1204,9 +1457,26 @@ export function QuoteDetailPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    if (!id || id === quoteId) return;
+    if (quoteId && persistenceStatus === "saved") return;
+    loadQuote(id);
+  }, [id, loadQuote, persistenceStatus, quoteId]);
+
+  useEffect(() => {
+    if (!id || !quoteId || id === quoteId || persistenceStatus !== "saved") return;
+    navigate(`/quotes/${quoteId}`, { replace: true });
+  }, [id, navigate, persistenceStatus, quoteId]);
+
   const cadName = cad?.fileName?.replace(/\.[^.]+$/, "") ?? "";
   const title = rfq.project || cadName || "Untitled quote";
-  const subText = `Draft${searchQuery?` · filter: "${searchQuery}"`:""}`;
+  const subText = persistenceStatus === "loading"
+    ? "Loading saved quote"
+    : persistenceStatus === "saving"
+      ? "Saving quote"
+      : quoteId
+        ? "Saved draft"
+        : `Unsaved draft${searchQuery?` · filter: "${searchQuery}"`:""}`;
   const quoteRef = rfq.rfqRef || id || "";
 
   return (
@@ -1214,7 +1484,7 @@ export function QuoteDetailPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Quote · {title}</h1>
-          <div className="page-sub">
+          <div className={`page-sub ${persistenceStatus === "loading" || persistenceStatus === "saving" ? "busy" : ""}`}>
             <span className="status-dot"/>
             <span>{subText}</span>
             {quoteRef && <>
@@ -1224,6 +1494,13 @@ export function QuoteDetailPage() {
           </div>
         </div>
       </div>
+      {persistenceError && (
+        <div className="quote-page-error">
+          <TriangleAlert size={14}/>
+          <span>{persistenceError}</span>
+          <button type="button" onClick={clearPersistenceError} title="Dismiss error"><X size={14}/></button>
+        </div>
+      )}
       <QuoteWorkspace searchQuery={searchQuery} onOpenViewer={() => navigate("/viewer")} />
     </div>
   );

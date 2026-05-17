@@ -1,34 +1,41 @@
 import { asc, desc, eq, isNull, or } from "drizzle-orm";
 import { getDb } from "../client";
+import { browserDb, isBrowserDbFallback } from "../browserFallback";
 import { quotes, type NewQuote, type Quote, type QuoteStatus } from "../schema";
 
 export async function getAllQuotes(): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getAllQuotes();
   const db = await getDb();
   return db.select().from(quotes).orderBy(desc(quotes.createdAt)).all();
 }
 
 export async function getQuoteById(id: string): Promise<Quote | null> {
+  if (isBrowserDbFallback()) return browserDb.getQuoteById(id);
   const db = await getDb();
   return (await db.select().from(quotes).where(eq(quotes.id, id)).get()) ?? null;
 }
 
 export async function getQuotesByCustomer(customerId: string): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getQuotesByCustomer(customerId);
   const db = await getDb();
   return db.select().from(quotes).where(eq(quotes.customerId, customerId)).orderBy(desc(quotes.createdAt)).all();
 }
 
 export async function getQuotesByStatus(status: QuoteStatus): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getQuotesByStatus(status);
   const db = await getDb();
   return db.select().from(quotes).where(eq(quotes.status, status)).orderBy(desc(quotes.createdAt)).all();
 }
 
 export async function getQuotesByRfq(rfqId: string): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getQuotesByRfq(rfqId);
   const db = await getDb();
   return db.select().from(quotes).where(eq(quotes.rfqId, rfqId)).orderBy(desc(quotes.createdAt)).all();
 }
 
 /** All revisions in a chain, oldest first. Pass any quote id from the chain. */
 export async function getRevisionChain(quoteId: string): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getRevisionChain(quoteId);
   const db = await getDb();
   const quote = await getQuoteById(quoteId);
   if (!quote) return [];
@@ -43,6 +50,7 @@ export async function getRevisionChain(quoteId: string): Promise<Quote[]> {
 
 /** Root revisions only (parent_quote_id IS NULL) — for list views that should not show every revision. */
 export async function getRootQuotes(): Promise<Quote[]> {
+  if (isBrowserDbFallback()) return browserDb.getRootQuotes();
   const db = await getDb();
   return db.select().from(quotes).where(isNull(quotes.parentQuoteId)).orderBy(desc(quotes.createdAt)).all();
 }
@@ -50,6 +58,7 @@ export async function getRootQuotes(): Promise<Quote[]> {
 export async function createQuote(
   data: Omit<NewQuote, "id" | "createdAt" | "updatedAt">,
 ): Promise<Quote> {
+  if (isBrowserDbFallback()) return browserDb.createQuote(data);
   const db = await getDb();
   const now = new Date();
   const id = crypto.randomUUID();
@@ -61,6 +70,7 @@ export async function updateQuote(
   id: string,
   data: Partial<Omit<NewQuote, "id" | "createdAt" | "updatedAt">>,
 ): Promise<Quote | null> {
+  if (isBrowserDbFallback()) return browserDb.updateQuote(id, data);
   const db = await getDb();
   await db.update(quotes).set({ ...data, updatedAt: new Date() }).where(eq(quotes.id, id)).run();
   return getQuoteById(id);
@@ -71,6 +81,7 @@ export async function updateQuoteStatus(id: string, status: QuoteStatus): Promis
 }
 
 export async function deleteQuote(id: string): Promise<void> {
+  if (isBrowserDbFallback()) return browserDb.deleteQuote(id);
   const db = await getDb();
   await db.delete(quotes).where(eq(quotes.id, id)).run();
 }

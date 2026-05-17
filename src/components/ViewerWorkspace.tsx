@@ -90,26 +90,66 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   }, [cad, selectedId, hiddenIds, preIsolateHidden]);
 
 
-  // Exit isolate when selection changes
+  const clearSelection = useCallback(() => {
+    if (preIsolateHidden !== null) {
+      setHiddenIds(preIsolateHidden);
+      setPreIsolateHidden(null);
+    }
+    setSelectedId(undefined);
+    setBodyMeasure(null);
+    setMeasureStep(0);
+  }, [preIsolateHidden]);
+
+  const selectMesh = useCallback((id: string) => {
+    if (preIsolateHidden !== null) {
+      setHiddenIds(preIsolateHidden);
+      setPreIsolateHidden(null);
+    }
+    setBodyMeasure(null);
+    setSelectedId(id);
+    setMeasureStep(0);
+  }, [preIsolateHidden]);
+
+  const toggleSelection = useCallback((id: string) => {
+    if (selectedId === id) {
+      clearSelection();
+      return;
+    }
+    selectMesh(id);
+  }, [clearSelection, selectMesh, selectedId]);
+
   useEffect(() => {
-    setPreIsolateHidden(prev => {
-      if (prev !== null) setHiddenIds(prev);
-      return null;
-    });
-  }, [selectedId]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName.toLowerCase();
+      const inField = tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
+      if (event.key === "Escape" && !inField && selectedId) {
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [clearSelection, selectedId]);
 
   // Reset viewer state on new file load
   useEffect(() => {
-    setHiddenIds(new Set());
-    setSelectedId(undefined);
-    setPreIsolateHidden(null);
-    setBodyMeasure(null);
-    setMeasuredMm(null);
-    setMeasureActive(false);
-    setMeasureStep(0);
-    setExplodeActive(false);
-    setExplodeMaster(0);
-    setExplodeTrim({ x: 1, y: 1, z: 1 });
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setHiddenIds(new Set());
+      setSelectedId(undefined);
+      setPreIsolateHidden(null);
+      setBodyMeasure(null);
+      setMeasuredMm(null);
+      setMeasureActive(false);
+      setMeasureStep(0);
+      setExplodeActive(false);
+      setExplodeMaster(0);
+      setExplodeTrim({ x: 1, y: 1, z: 1 });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [cad]);
 
   const clippingPlane = null;
@@ -120,9 +160,18 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
     () => selectedMesh ? computeMeshStats(selectedMesh.geometry) : null,
     [selectedMesh],
   );
+  const selectedShape = useMemo(
+    () => selectedMesh ? analyzeShape(selectedMesh.geometry) : null,
+    [selectedMesh],
+  );
 
   const toggleHide = (id: string) => {
-    setHiddenIds(cur => { const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setHiddenIds(cur => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   };
 
   const geo = cad?.geometry;
@@ -130,7 +179,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   return (
     <div className="viewer-grid">
       {/* Left panel */}
-      <div className="panel">
+      <div className="panel viewer-left">
         <div className="tabstrip">
           <button className="on"><BoxesIcon size={13} /> Parts Tree</button>
         </div>
@@ -161,7 +210,11 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                   const hidden = hiddenIds.has(m.id);
                   return (
                     <div key={m.id} className={`tree-row ${selectedId === m.id ? "sel" : ""} ${hidden ? "hidden" : ""}`}
-                      onClick={() => { setSelectedId(m.id); viewerRef.current?.fit(m.id); }}>
+                      onClick={() => {
+                        const wasSelected = selectedId === m.id;
+                        toggleSelection(m.id);
+                        if (!wasSelected) viewerRef.current?.fit(m.id);
+                      }}>
                       <span className="swatch" style={{ background: m.color }} />
                       <span className="name">{m.name}</span>
                       <button className="eye" title={hidden ? "Show" : "Hide"} onClick={e => { e.stopPropagation(); toggleHide(m.id); }}>
@@ -273,10 +326,11 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                 : (() => {
                     const { analysis } = bodyMeasure;
                     const fmt = (v: number) => `${v.toFixed(2)} mm`;
-                    let label = "";
-                    if (analysis.kind === "cylinder") label = `Ø ${fmt(analysis.outerDiaMm)}${analysis.innerDiaMm != null ? ` · Inner Ø ${fmt(analysis.innerDiaMm)}` : ""} · Length ${fmt(analysis.lengthMm)}`;
-                    else if (analysis.kind === "hex") label = `Hex AF ${fmt(analysis.afMm)} · Length ${fmt(analysis.lengthMm)}`;
-                    else label = `${fmt(analysis.xMm)} × ${fmt(analysis.yMm)} × ${fmt(analysis.zMm)}`;
+                    const label = analysis.kind === "cylinder"
+                      ? `Ø ${fmt(analysis.outerDiaMm)}${analysis.innerDiaMm != null ? ` · Inner Ø ${fmt(analysis.innerDiaMm)}` : ""} · Length ${fmt(analysis.lengthMm)}`
+                      : analysis.kind === "hex"
+                        ? `Hex AF ${fmt(analysis.afMm)} · Length ${fmt(analysis.lengthMm)}`
+                        : `${fmt(analysis.xMm)} × ${fmt(analysis.yMm)} × ${fmt(analysis.zMm)}`;
                     return <>
                       <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text-1)" }}>{label}</span>
                       <button className="btn sm ghost" onClick={() => setBodyMeasure(null)}>Clear</button>
@@ -311,7 +365,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               selectionFilter={selectionFilter}
               onMeasured={handleMeasured}
               onBodyMeasure={handleBodyMeasure}
-              onSelectMesh={id => { if (!measureActive) { setSelectedId(id); setMeasureStep(0); } else if (selectionFilter === "point") { setMeasureStep(s => s === 0 ? 1 : 0); } }}
+              onSelectMesh={id => { if (!measureActive) { id ? toggleSelection(id) : clearSelection(); } else if (selectionFilter === "point") { setMeasureStep(s => s === 0 ? 1 : 0); } }}
             />
             <div className="canvas-hud-top">
               <span className="pill"><Box size={11} /> {cad.fileName}</span>
@@ -332,7 +386,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
       </div>
 
       {/* Right inspector */}
-      <div className="panel">
+      <div className="panel viewer-inspector">
         <div className="panel-head">
           <span className="title">Inspector</span>
         </div>
@@ -342,6 +396,15 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             <>
               <div className="insp-section">
                 <h4>Geometry {selectedStats && <span style={{ fontWeight: 400, color: "var(--text-3)", fontSize: 10 }}>— selected part</span>}</h4>
+                {selectedMesh && selectedShape && (
+                  <div className="insp-part-summary">
+                    <span className="swatch" style={{ background: selectedMesh.color }} />
+                    <span className="name">{selectedMesh.name}</span>
+                    <span className="id">
+                      {selectedShape.kind === "cylinder" ? "ø cyl" : selectedShape.kind === "hex" ? "hex" : "box"}
+                    </span>
+                  </div>
+                )}
                 <div className="insp-tile-row">
                   <div className="insp-tile">
                     <div className="label">Volume</div>
@@ -352,6 +415,15 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                   <div className="kv"><span className="k">Bounding · X</span><span className="v">{selectedStats.boundingBoxMm.x.toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Y</span><span className="v">{selectedStats.boundingBoxMm.y.toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Z</span><span className="v">{selectedStats.boundingBoxMm.z.toFixed(2)} mm</span></div>
+                  {selectedShape?.kind === "cylinder" && <>
+                    <div className="kv"><span className="k">Outer Ø</span><span className="v">{selectedShape.outerDiaMm.toFixed(2)} mm</span></div>
+                    {selectedShape.innerDiaMm != null && <div className="kv"><span className="k">Inner Ø</span><span className="v">{selectedShape.innerDiaMm.toFixed(2)} mm</span></div>}
+                    <div className="kv"><span className="k">Length</span><span className="v">{selectedShape.lengthMm.toFixed(2)} mm</span></div>
+                  </>}
+                  {selectedShape?.kind === "hex" && <>
+                    <div className="kv"><span className="k">AF</span><span className="v">{selectedShape.afMm.toFixed(2)} mm</span></div>
+                    <div className="kv"><span className="k">Length</span><span className="v">{selectedShape.lengthMm.toFixed(2)} mm</span></div>
+                  </>}
                 </> : <>
                   <div className="kv"><span className="k">Bounding · X</span><span className="v">{(geo.boundingBoxMm?.x ?? 0).toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Y</span><span className="v">{(geo.boundingBoxMm?.y ?? 0).toFixed(2)} mm</span></div>
@@ -364,43 +436,6 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               Load a STEP file to view geometry details
             </div>
           )}
-
-          {selectedMesh && selectedStats && (() => {
-            const shape = analyzeShape(selectedMesh.geometry);
-            const mm = (v: number) => <><span style={{ fontFamily: "var(--font-mono)" }}>{v.toFixed(2)}</span><span style={{ color: "var(--text-4)", fontSize: 10, marginLeft: 3 }}>mm</span></>;
-            return (
-              <>
-                <div className="insp-section" style={{ paddingBottom: 14 }}>
-                  <h4>Selection</h4>
-                </div>
-                <div className="insp-selection">
-                  <div className="row1">
-                    <span className="swatch" style={{ background: selectedMesh.color }} />
-                    <span className="name">{selectedMesh.name}</span>
-                    <span className="id">
-                      {shape.kind === "cylinder" ? "⌀ cyl" : shape.kind === "hex" ? "⬡ hex" : "▭ box"}
-                    </span>
-                  </div>
-                  <div className="grid">
-                    {shape.kind === "cylinder" && <>
-                      <span className="k">Outer Ø</span><span className="v">{mm(shape.outerDiaMm)}</span>
-                      {shape.innerDiaMm != null && <><span className="k">Inner Ø</span><span className="v">{mm(shape.innerDiaMm)}</span></>}
-                      <span className="k">Length</span><span className="v">{mm(shape.lengthMm)}</span>
-                    </>}
-                    {shape.kind === "hex" && <>
-                      <span className="k">AF</span><span className="v">{mm(shape.afMm)}</span>
-                      <span className="k">Length</span><span className="v">{mm(shape.lengthMm)}</span>
-                    </>}
-                    {shape.kind === "box" && <>
-                      <span className="k">X</span><span className="v">{mm(shape.xMm)}</span>
-                      <span className="k">Y</span><span className="v">{mm(shape.yMm)}</span>
-                      <span className="k">Z</span><span className="v">{mm(shape.zMm)}</span>
-                    </>}
-                  </div>
-                </div>
-              </>
-            );
-          })()}
 
           <div style={{ marginTop: "auto", padding: "14px 14px 10px", borderTop: "1px solid var(--divider)" }}>
             <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-3)", marginBottom: 8 }}>CONTROLS</div>

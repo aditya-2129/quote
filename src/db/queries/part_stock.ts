@@ -1,8 +1,10 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../client";
+import { browserDb, isBrowserDbFallback } from "../browserFallback";
 import { partStock, type NewPartStock, type PartStock } from "../schema";
 
 export async function getPartStock(partId: string): Promise<PartStock | null> {
+  if (isBrowserDbFallback()) return browserDb.getPartStock(partId);
   const db = await getDb();
   return (await db.select().from(partStock).where(eq(partStock.partId, partId)).get()) ?? null;
 }
@@ -10,6 +12,7 @@ export async function getPartStock(partId: string): Promise<PartStock | null> {
 export async function upsertPartStock(
   data: Omit<NewPartStock, "id" | "createdAt">,
 ): Promise<PartStock> {
+  if (isBrowserDbFallback()) return browserDb.upsertPartStock(data);
   const db = await getDb();
   const existing = await getPartStock(data.partId);
   if (existing) {
@@ -22,6 +25,7 @@ export async function upsertPartStock(
 }
 
 export async function deletePartStock(partId: string): Promise<void> {
+  if (isBrowserDbFallback()) return browserDb.deletePartStock(partId);
   const db = await getDb();
   await db.delete(partStock).where(eq(partStock.partId, partId)).run();
 }

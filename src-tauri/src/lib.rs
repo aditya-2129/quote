@@ -2,12 +2,20 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  let migrations = vec![Migration {
-    version: 1,
-    description: "create_initial_tables",
-    sql: include_str!("../migrations/0001_initial.sql"),
-    kind: MigrationKind::Up,
-  }];
+  let migrations = vec![
+    Migration {
+      version: 1,
+      description: "create_initial_tables",
+      sql: include_str!("../migrations/0001_initial.sql"),
+      kind: MigrationKind::Up,
+    },
+    Migration {
+      version: 2,
+      description: "scrub_undefined_json",
+      sql: include_str!("../migrations/0002_scrub_undefined_json.sql"),
+      kind: MigrationKind::Up,
+    },
+  ];
 
   tauri::Builder::default()
     .setup(|app| {

@@ -1,7 +1,15 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { parts } from "./parts";
 
-export type StockShape = "plate" | "block" | "round-bar" | "square-bar" | "tube";
+export type StockShape =
+  | "rect"
+  | "round"
+  | "hex"
+  | "plate"
+  | "block"
+  | "round-bar"
+  | "square-bar"
+  | "tube";
 
 /** Dims keyed by shape:
  *  plate / block  → { L, W, H }

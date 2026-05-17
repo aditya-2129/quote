@@ -229,13 +229,13 @@ export function CadViewer({
     box.getSize(size);
     const maxSize = Math.max(size.x, size.y, size.z, 1);
     const distance = maxSize * 1.8;
+    const viewDirection = camera.position.clone().sub(controls.target).normalize();
+    if (viewDirection.lengthSq() === 0) {
+      viewDirection.set(1, 0.78, 1).normalize();
+    }
 
     controls.target.copy(center);
-    camera.position.set(
-      center.x + distance,
-      center.y + distance * 0.78,
-      center.z + distance,
-    );
+    camera.position.copy(center).addScaledVector(viewDirection, distance);
     camera.near = Math.max(distance / 500, 0.01);
     camera.far = distance * 20;
     camera.updateProjectionMatrix();

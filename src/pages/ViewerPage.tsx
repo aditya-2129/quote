@@ -22,7 +22,7 @@ export function ViewerPage() {
   }, []);
 
   return (
-    <div className="page">
+    <div className="page viewer-page">
       <ViewerWorkspace cad={cad} isImporting={isImporting} onFile={handleFile} />
     </div>
   );

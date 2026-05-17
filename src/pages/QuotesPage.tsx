@@ -25,66 +25,59 @@ export function QuotesPage() {
       </div>
       <div className="panel">
         <div className="panel-head"><div className="title">All Quotes</div></div>
-        {loading ? <EmptyState text="Loading…" /> : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Quote Number</th>
-                  <th>Rev</th>
-                  <th>Title</th>
-                  <th>Status</th>
-                  <th>Asm Qty</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ cursor: "pointer" }} onClick={() => navigate("/quotes/demo")}>
-                  <td>RFQ-2026-014</td>
-                  <td>C</td>
-                  <td>Pump Manifold v3</td>
-                  <td><span className="status-pill" style={{ background: "var(--panel-3)", color: "var(--text-2)" }}>draft</span></td>
-                  <td>25</td>
-                  <td>₹51,919.73</td>
-                </tr>
-                {rows.map(r => {
-                  let badgeClass = "var(--panel-3)";
-                  let badgeText = "var(--text-2)";
-                  switch (r.status) {
-                    case "draft": badgeClass = "var(--panel-3)"; badgeText = "var(--text-2)"; break;
-                    case "review": badgeClass = "var(--warning-soft)"; badgeText = "var(--warning)"; break;
-                    case "sent": badgeClass = "var(--accent-soft)"; badgeText = "var(--accent-text)"; break;
-                    case "won": badgeClass = "var(--success-soft)"; badgeText = "var(--success)"; break;
-                    case "lost":
-                    case "expired": badgeClass = "var(--danger-soft)"; badgeText = "var(--danger)"; break;
-                  }
-                  
-                  // costSnapshot might be a stringified JSON if it's stored as JSON in sqlite, or an object. Let's safely extract it.
-                  let totalDisplay = "—";
-                  if (r.costSnapshot) {
-                    try {
-                      const costObj = typeof r.costSnapshot === "string" ? JSON.parse(r.costSnapshot) : r.costSnapshot;
-                      if (costObj && costObj.total !== undefined) {
-                        totalDisplay = `${r.currency} ${costObj.total.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                      }
-                    } catch (e) {
-                      // ignore parse errors
-                    }
-                  }
+        {loading ? <EmptyState text="Loading..." /> : rows.length === 0 ? (
+          <EmptyState text="No quotes yet." />
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Quote Number</th>
+                <th>Rev</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Asm Qty</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => {
+                let badgeClass = "var(--panel-3)";
+                let badgeText = "var(--text-2)";
+                switch (r.status) {
+                  case "draft": badgeClass = "var(--panel-3)"; badgeText = "var(--text-2)"; break;
+                  case "review": badgeClass = "var(--warning-soft)"; badgeText = "var(--warning)"; break;
+                  case "sent": badgeClass = "var(--accent-soft)"; badgeText = "var(--accent-text)"; break;
+                  case "won": badgeClass = "var(--success-soft)"; badgeText = "var(--success)"; break;
+                  case "lost":
+                  case "expired": badgeClass = "var(--danger-soft)"; badgeText = "var(--danger)"; break;
+                }
 
-                  return (
-                    <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/quotes/${r.id}`)}>
-                      <td>{r.quoteNumber}</td>
-                      <td>{r.revision}</td>
-                      <td>{r.title}</td>
-                      <td><span className="status-pill" style={{ background: badgeClass, color: badgeText }}>{r.status}</span></td>
-                      <td>{r.assemblyQuantity}</td>
-                      <td>{totalDisplay}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                let totalDisplay = "-";
+                if (r.costSnapshot) {
+                  try {
+                    const costObj = typeof r.costSnapshot === "string" ? JSON.parse(r.costSnapshot) : r.costSnapshot;
+                    if (costObj && costObj.total !== undefined) {
+                      totalDisplay = `${r.currency} ${costObj.total.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    }
+                  } catch {
+                    totalDisplay = "-";
+                  }
+                }
+
+                return (
+                  <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/quotes/${r.id}`)}>
+                    <td>{r.quoteNumber}</td>
+                    <td>{r.revision}</td>
+                    <td>{r.title}</td>
+                    <td><span className="status-pill" style={{ background: badgeClass, color: badgeText }}>{r.status}</span></td>
+                    <td>{r.assemblyQuantity}</td>
+                    <td>{totalDisplay}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
