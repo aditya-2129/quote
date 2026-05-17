@@ -11,7 +11,6 @@ import type {
   NewPartStock,
   NewQuote,
   NewQuoteCadSource,
-  NewQuoteEvent,
   NewRfq,
   Part,
   PartGeometry,
@@ -19,7 +18,6 @@ import type {
   PartStock,
   Quote,
   QuoteCadSource,
-  QuoteEvent,
   QuoteStatus,
   Rfq,
   RfqStatus,
@@ -38,7 +36,6 @@ type BrowserDb = {
   parts: Part[];
   partStock: PartStock[];
   quoteCadSources: QuoteCadSource[];
-  quoteEvents: QuoteEvent[];
   quotes: Quote[];
   rfqs: Rfq[];
 };
@@ -128,9 +125,6 @@ const initialDb: BrowserDb = {
       updatedAt: seedDate,
     },
   ],
-  quoteEvents: [
-    { id: "event-demo-created", quoteId: "quote-demo", eventType: "created", payload: { source: "browser-fallback" }, createdAt: seedDate },
-  ],
   quoteCadSources: [],
 };
 
@@ -186,7 +180,6 @@ function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
     deletePartRows(db, part.id);
   }
   db.parts = db.parts.filter(row => row.quoteId !== quoteId);
-  db.quoteEvents = db.quoteEvents.filter(row => row.quoteId !== quoteId);
   db.quoteCadSources = db.quoteCadSources.filter(row => row.quoteId !== quoteId);
 }
 
@@ -644,30 +637,6 @@ export const browserDb = {
     const db = readDb();
     db.quotes = db.quotes.filter(row => row.id !== id);
     deleteQuoteRows(db, id);
-    writeDb(db);
-  },
-
-  getEventsByQuote(quoteId: string, limit = 100): QuoteEvent[] {
-    return readDb().quoteEvents
-      .filter(row => row.quoteId === quoteId)
-      .sort(byCreatedDesc)
-      .slice(0, limit);
-  },
-  logQuoteEvent(data: Omit<NewQuoteEvent, "id" | "createdAt">): QuoteEvent {
-    const db = readDb();
-    const row: QuoteEvent = {
-      payload: null,
-      ...data,
-      id: newId("event"),
-      createdAt: now(),
-    };
-    db.quoteEvents.push(row);
-    writeDb(db);
-    return row;
-  },
-  deleteEventsForQuote(quoteId: string): void {
-    const db = readDb();
-    db.quoteEvents = db.quoteEvents.filter(row => row.quoteId !== quoteId);
     writeDb(db);
   },
 };

@@ -47,7 +47,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { dismissDfmIssue, getAllMaterials, getAllMachines, logQuoteEvent } from "../db/queries";
+import { dismissDfmIssue, getAllMaterials, getAllMachines } from "../db/queries";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
@@ -482,7 +482,7 @@ function QuotePreview({ onOpenViewer }: { onOpenViewer?: () => void }) {
   return (
     <div className="canvas" style={{flex:1,minHeight:0,display:"grid",placeItems:"center"}}>
       <div className="canvas-grid"/>
-      <div className="empty-state" style={{position:"relative",padding:"22px 18px",textAlign:"center"}}>
+      <div className="empty-state quote-preview-empty">
         <div className="es-ic"><Box size={20}/></div>
         <div className="es-title">No CAD model attached</div>
         <div className="es-hint" style={{maxWidth:280,margin:"4px auto 0"}}>Import a STEP file in the viewer to see the 3D model here. Manual parts can be added below without one.</div>
@@ -1029,28 +1029,6 @@ function Field({ label, value, unit, type="text", onChange, grid }: { label:stri
   );
 }
 
-function eventLabel(eventType: string): string {
-  switch (eventType) {
-    case "created": return "Quote created";
-    case "updated": return "Quote updated";
-    case "dfm_resolved": return "DFM issue accepted";
-    case "note_added": return "Note saved";
-    case "revision_created": return "Revision created";
-    case "status_changed": return "Status changed";
-    case "sent": return "Quote sent";
-    case "viewed": return "Quote viewed";
-    default: return eventType.replace(/_/g, " ");
-  }
-}
-
-function formatEventMeta(payload: Record<string, unknown> | null): string {
-  if (!payload) return "";
-  if (typeof payload.title === "string") return payload.title;
-  if (typeof payload.partCount === "number") return `${payload.partCount} parts`;
-  if (typeof payload.from === "string" && typeof payload.to === "string") return `${payload.from} to ${payload.to}`;
-  return "";
-}
-
 function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   parts:Part[];
   asmQty:number; setAsmQty:(v:number)=>void;
@@ -1060,7 +1038,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   const {
     rfq,
     setRfq,
-    quoteEvents,
     quoteId,
     quoteNumber,
     quoteStatus,
@@ -1072,7 +1049,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
     clearPersistenceError,
   } = useQuoteState();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"inputs"|"history"|"notes">("inputs");
+  const [tab, setTab] = useState<"inputs"|"notes">("inputs");
   const r=rollup(parts,asmQty,commercial);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
   const unit=asmQty>0?r.total/asmQty:0;
@@ -1122,14 +1099,19 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
     <div className="panel rfq-panel">
       <div className="panel-head">
         <span className="title">{rfq.rfqRef || quoteNumber || rfq.project || "RFQ"}</span>
-        {rfq.customer && <div className="right"><span className="chip"><BoxesIcon size={11}/> {rfq.customer}</span></div>}
+        <div className="right">
+          {rfq.customer && <span className="chip"><BoxesIcon size={11}/> {rfq.customer}</span>}
+          <span className={`chip ${persistenceStatus === "error" ? "" : "success"}`}>
+            <span className="dot"/>
+            {isSaving ? "Saving..." : persistenceStatus === "saved" ? savedText : "Draft"}
+          </span>
+        </div>
       </div>
       <div className="tabstrip">
         <button className={tab==="inputs"?"on":""} onClick={()=>setTab("inputs")}><Sliders size={13}/> Inputs</button>
-        <button className={tab==="history"?"on":""} onClick={()=>setTab("history")}><Clock size={13}/> History</button>
         <button className={tab==="notes"?"on":""} onClick={()=>setTab("notes")}><ScanLine size={13}/> Notes</button>
       </div>
-      <div style={{flex:1,minHeight:0,overflow:"auto",display:"flex",flexDirection:"column"}}>
+      <div className={`rfq-tab-body ${tab === "inputs" ? "" : "bounded"}`}>
         {tab==="inputs"&&(
           <>
 <div className="rfq-fields">
@@ -1150,16 +1132,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
             <div style={{height:10}}/>
 </>
         )}
-        {tab==="history"&&(
-          <div className="recents">
-            {quoteEvents.length>0 ? quoteEvents.map((event,i)=>(
-              <div key={event.id} className="recent" style={i===0?{background:"var(--accent-soft)"}:undefined}>
-                <div className="name">{eventLabel(event.eventType)}</div><div className="amt">{fmtINR(r.total)}</div>
-                <div className="meta">{formatEventMeta(event.payload)}</div><div className="date">{new Date(event.createdAt).toLocaleDateString()}</div>
-              </div>
-            )) : <div className="dfm-empty">No saved history yet.</div>}
-          </div>
-        )}
         {tab==="notes"&&(
           <div style={{padding:14}}>
             <textarea rows={10} aria-label="Quote notes" value={rfq.notes} onChange={e=>setRfq({...rfq, notes:e.target.value})} style={{width:"100%",padding:10,resize:"none",background:"var(--panel-2)",border:"1px solid var(--border)",borderRadius:6,fontFamily:"var(--font-sans)",fontSize:12.5,color:"var(--text-1)",outline:0}}/>
@@ -1174,13 +1146,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
         </div>
       )}
       <div className="total-panel big">
-        <div className="total-row">
-          <span className="label">Quotation total</span>
-          <span className={`chip ${persistenceStatus === "error" ? "" : "success"}`}>
-            <span className="dot"/>
-            {isSaving ? "Saving..." : persistenceStatus === "saved" ? savedText : "Draft"}
-          </span>
-        </div>
         <div className="duo">
           <div className="cell"><div className="label">Total</div><div className="value">{fmtINR(r.total)}</div><div className="sub">{asmQty} assemblies</div></div>
           <div className="cell right"><div className="label">Per unit</div><div className="value">{fmtINR(unit)}</div><div className="sub">incl. {commercial.marginPct}% margin</div></div>
@@ -1450,11 +1415,6 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
     }));
     if (quoteId) {
       void dismissDfmIssue(issue.id);
-      void logQuoteEvent({
-        quoteId,
-        eventType: "dfm_resolved",
-        payload: { issueId: issue.id, partId: issue.partId, title: issue.title },
-      });
     }
   }, [quoteId, setParts]);
 

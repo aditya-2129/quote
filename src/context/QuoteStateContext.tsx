@@ -8,7 +8,7 @@ import {
   type LoadedQuoteWorkflow,
   type QuoteWorkflowDraft,
 } from "../db/quoteWorkflowService";
-import type { ProjectNameSource, QuoteEvent } from "../db/schema";
+import type { ProjectNameSource } from "../db/schema";
 
 export type Rfq = { customer: string; project: string; rfqRef: string; notes: string };
 export type PersistenceStatus = "idle" | "loading" | "saving" | "saved" | "error";
@@ -38,7 +38,6 @@ interface QuoteStateCtx {
   quoteNumber: string | null;
   quoteStatus: "draft" | "review" | "sent" | "won" | "lost" | "expired";
   rfqId: string | null;
-  quoteEvents: QuoteEvent[];
   persistenceStatus: PersistenceStatus;
   persistenceError: string | null;
   lastSavedAt: Date | null;
@@ -161,7 +160,6 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   const [quoteNumber, setQuoteNumber] = useState<string | null>(null);
   const [quoteStatus, setQuoteStatus] = useState<QuoteStateCtx["quoteStatus"]>("draft");
   const [rfqId, setRfqId] = useState<string | null>(null);
-  const [quoteEvents, setQuoteEvents] = useState<QuoteEvent[]>([]);
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>("idle");
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -212,7 +210,6 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     setParts(snapshot.parts);
     setSelectedId(snapshot.parts[0]?.id ?? null);
     setLastSavedAt(snapshot.records.quote.updatedAt ?? null);
-    setQuoteEvents(snapshot.records.events);
     lastSavedSignatureRef.current = draftSignature(snapshot);
     if (snapshot.cadSource) {
       const current = getCadBytes();
@@ -242,7 +239,6 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     setQuoteStatus(snapshot.records.quote.status);
     setRfqId(snapshot.rfqId);
     setLastSavedAt(snapshot.records.quote.updatedAt ?? null);
-    setQuoteEvents(snapshot.records.events);
     lastSavedSignatureRef.current = draftSignature(snapshot);
     if (snapshot.cadSource) {
       lastSavedCadFileRef.current = snapshot.cadSource.fileName;
@@ -272,7 +268,6 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
           setQuoteNumber(null);
           setQuoteStatus("draft");
           setRfqId(null);
-          setQuoteEvents([]);
           setPersistenceStatus("idle");
           return false;
         }
@@ -374,7 +369,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   const clearPersistenceError = useCallback(() => setPersistenceError(null), []);
 
   return (
-    <QuoteStateContext.Provider value={{ parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, quoteEvents, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, clearPersistenceError }}>
+    <QuoteStateContext.Provider value={{ parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, clearPersistenceError }}>
       {children}
     </QuoteStateContext.Provider>
   );

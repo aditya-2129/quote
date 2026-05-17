@@ -16,7 +16,6 @@ import {
   getAllMaterials,
   getAllQuotes,
   getDfmIssuesByPart,
-  getEventsByQuote,
   getOperationsByPart,
   getPartGeometry,
   getPartById,
@@ -26,7 +25,6 @@ import {
   getQuoteCadSource,
   getRootQuotes,
   getRfqById,
-  logQuoteEvent,
   updateOperation,
   updatePart,
   updateQuote,
@@ -42,7 +40,6 @@ import type {
   ProjectNameSource,
   Quote,
   QuoteCostSnapshot,
-  QuoteEvent,
   Rfq,
   UnitSystem,
 } from "./schema";
@@ -129,7 +126,6 @@ export type LoadedQuoteWorkflow = QuoteWorkflowDraft & {
   records: {
     rfq: Rfq | null;
     quote: Quote;
-    events: QuoteEvent[];
   };
   cadSource: QuoteWorkflowCadSource | null;
 };
@@ -580,12 +576,6 @@ export async function saveQuoteWorkflow(
     });
   }
 
-  await logQuoteEvent({
-    quoteId: quote.id,
-    eventType: draft.quoteId ? "updated" : "created",
-    payload: { rfqId: rfq.id, partCount: draft.parts.length },
-  });
-
   return {
     rfq,
     quote,
@@ -652,7 +642,6 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     records: {
       rfq,
       quote,
-      events: await getEventsByQuote(quote.id),
     },
   };
 }
@@ -836,8 +825,8 @@ async function allocateQuoteNumber(): Promise<string> {
 export type SendQuoteResult = { quote: Quote; quoteNumber: string };
 
 /**
- * Transitions a draft into "sent": assigns a quote number if missing, flips
- * status, and writes a status_changed/sent event pair to history.
+ * Transitions a draft into "sent": assigns a quote number if missing and flips
+ * status.
  */
 export async function sendQuoteWorkflow(quoteId: string): Promise<SendQuoteResult> {
   const quote = await getQuoteById(quoteId);
@@ -846,23 +835,11 @@ export async function sendQuoteWorkflow(quoteId: string): Promise<SendQuoteResul
   let quoteNumber = quote.quoteNumber;
   if (!quoteNumber) quoteNumber = await allocateQuoteNumber();
 
-  const previousStatus = quote.status;
   const updated = await updateQuote(quoteId, {
     quoteNumber,
     status: "sent",
   });
   if (!updated) throw new Error(`Quote not found after send: ${quoteId}`);
-
-  await logQuoteEvent({
-    quoteId,
-    eventType: "status_changed",
-    payload: { from: previousStatus, to: "sent", quoteNumber },
-  });
-  await logQuoteEvent({
-    quoteId,
-    eventType: "sent",
-    payload: { quoteNumber },
-  });
 
   return { quote: updated, quoteNumber };
 }

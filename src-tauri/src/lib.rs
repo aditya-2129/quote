@@ -27,6 +27,12 @@ pub fn run() {
       sql: include_str!("../migrations/0004_project_name_source.sql"),
       kind: MigrationKind::Up,
     },
+    Migration {
+      version: 5,
+      description: "drop_quote_events",
+      sql: include_str!("../migrations/0005_drop_quote_events.sql"),
+      kind: MigrationKind::Up,
+    },
   ];
 
   tauri::Builder::default()

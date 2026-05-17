@@ -6,6 +6,11 @@ import { cleanupDuplicateDraftQuotes, createBlankQuoteWorkflow, deleteQuoteWorkf
 import type { Quote } from "../db/schema";
 import { EmptyState } from "../components/EmptyState";
 
+function draftReference(quote: Quote, draftIndex: number): string {
+  const year = quote.createdAt.getFullYear().toString().slice(-2);
+  return `DQ-${year}-${String(draftIndex + 1).padStart(3, "0")}`;
+}
+
 export function QuotesPage() {
   const [rows, setRows] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +53,16 @@ export function QuotesPage() {
     ].filter(Boolean).some(value => String(value).toLowerCase().includes(needle));
   });
 
+  const draftReferenceById = new Map(
+    rows
+      .filter(row => !row.quoteNumber)
+      .sort((a, b) => {
+        const byDate = a.createdAt.getTime() - b.createdAt.getTime();
+        return byDate !== 0 ? byDate : a.title.localeCompare(b.title);
+      })
+      .map((row, index) => [row.id, draftReference(row, index)]),
+  );
+
   async function handleCleanupDuplicates() {
     const ok = window.confirm("Remove accidental duplicate untitled draft quotes? The newest copy in each exact duplicate group will be kept.");
     if (!ok) return;
@@ -79,7 +94,7 @@ export function QuotesPage() {
   }
 
   async function handleDeleteQuote(quote: Quote) {
-    const label = quote.quoteNumber || quote.title || quote.id;
+    const label = quote.quoteNumber || quote.title || "draft quote";
     const ok = window.confirm(`Delete quote "${label}"? This removes its parts, operations, and history.`);
     if (!ok) return;
     setActionBusy(true);
@@ -132,7 +147,7 @@ export function QuotesPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Quote Number</th>
+                <th>Reference</th>
                 <th>Rev</th>
                 <th>Title</th>
                 <th>Status</th>
@@ -168,7 +183,7 @@ export function QuotesPage() {
 
                 return (
                   <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/quotes/${r.id}`)}>
-                    <td>{r.quoteNumber || <span className="muted">Draft {r.id.slice(0, 8)}</span>}</td>
+                    <td>{r.quoteNumber || <span className="muted">{draftReferenceById.get(r.id) ?? "DQ"}</span>}</td>
                     <td>{r.revision}</td>
                     <td>{r.title}</td>
                     <td><span className="status-pill" style={{ background: badgeClass, color: badgeText }}>{r.status}</span></td>
