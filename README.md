@@ -175,9 +175,9 @@ For deeper project context, see:
 
 ---
 
-## Status & TODOs
+## Status
 
-The app is functional end-to-end for the import -> group -> price -> preview loop. Persistence now writes the quote workflow to Drizzle/SQLite with a browser fallback. Some UI affordances are still placeholder - see [`TODO.md`](TODO.md) for the live punch list (Send/share, DFM actions, rate-card shortcuts, and viewer settings).
+The app is functional end-to-end for the import -> group -> price -> preview loop. Persistence writes the quote workflow to Drizzle/SQLite with a browser fallback.
 
 ---
 

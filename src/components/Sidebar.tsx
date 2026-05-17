@@ -14,8 +14,8 @@ import { NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
   { id: "viewer", to: "/viewer", label: "Viewer", icon: Box },
-  { id: "rfqs",      to: "/rfqs",      label: "RFQs",      icon: Inbox,      badge: 8 },
-  { id: "quotes",    to: "/quotes",    label: "Quotes",    icon: FileText,   badge: 12 },
+  { id: "rfqs",      to: "/rfqs",      label: "RFQs",      icon: Inbox },
+  { id: "quotes",    to: "/quotes",    label: "Quotes",    icon: FileText },
   { id: "parts",     to: "/parts",     label: "Parts",     icon: Package },
   { id: "customers", to: "/customers", label: "Customers", icon: Users },
   { id: "bops",      to: "/bops",      label: "BOPs",      icon: Package },
@@ -52,7 +52,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <NavLink key={it.id} className={({ isActive }) => `sb-item ${isActive ? "active" : ""}`} to={it.to} title={collapsed ? it.label : undefined}>
                 <span className="ic"><Icon size={15} /></span>
                 <span className="label">{it.label}</span>
-                {it.badge !== undefined && <span className="badge">{it.badge}</span>}
               </NavLink>
             );
           })}

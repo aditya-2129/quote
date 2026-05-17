@@ -10,7 +10,6 @@ Before non-trivial code work:
 2. Read `docs/architecture.md` for code boundaries.
 3. Read relevant ADRs in `docs/adr/`.
 4. Read `docs/design-system.md` before UI work.
-5. Read `TODO.md` for known unfinished surfaces.
 
 ## Consumer Rules
 

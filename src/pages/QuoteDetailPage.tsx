@@ -28,7 +28,6 @@ import {
   ChevronUp,
   Clock,
   Cog,
-  Copy,
   ExternalLink,
   FileText,
   Layers,
@@ -39,7 +38,6 @@ import {
   ScanLine,
   Search,
   Send,
-  Settings2,
   Sliders,
   Square,
   Trash2,
@@ -1492,10 +1490,6 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
       <div className="panel-head">
         <span className="title">Cost breakdown</span>
         <span className="sub">Subtotal {fmtINR(r.subtotal)} · Margin {fmtINR(r.margin)}</span>
-        <div className="right">
-          <button className="btn sm ghost"><Copy size={12}/> Duplicate</button>
-          <button className="btn sm ghost"><Settings2 size={12}/> Rate card</button>
-        </div>
       </div>
       <div className="margin-bar">{segs.map(s => <span key={s.k} style={{width:`${(s.v/segsTotal)*100}%`,background:s.c}}/>)}</div>
       <div className="margin-legend">{segs.map(s => <span key={s.k}><span className="dot" style={{background:s.c}}/>{s.k}<span className="v">{fmtINR(s.v)}</span></span>)}</div>
@@ -2138,6 +2132,7 @@ export function QuoteDetailPage() {
     </div>
   );
 }
+
 
 
 

@@ -13,7 +13,7 @@ Recommended conventions:
 
 - One issue per independently shippable vertical slice.
 - Include user-visible behavior, implementation notes, acceptance criteria, and verification.
-- Link related docs such as `CONTEXT.md`, `docs/architecture.md`, ADRs, and `TODO.md` when relevant.
+- Link related docs such as `CONTEXT.md`, `docs/architecture.md`, and ADRs when relevant.
 
 ## Drafting Work Locally
 
