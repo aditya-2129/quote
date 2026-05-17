@@ -14,17 +14,16 @@ import { NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
   { id: "viewer", to: "/viewer", label: "Viewer", icon: Box },
-  { id: "rfqs",      to: "/rfqs",      label: "RFQs",      icon: Inbox },
+  { id: "rfqs",      to: "/rfqs",      label: "Inquiries", icon: Inbox },
   { id: "quotes",    to: "/quotes",    label: "Quotes",    icon: FileText },
-  { id: "parts",     to: "/parts",     label: "Parts",     icon: Package },
   { id: "customers", to: "/customers", label: "Customers", icon: Users },
-  { id: "bops",      to: "/bops",      label: "BOPs",      icon: Package },
   { id: "analytics", to: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const SECONDARY_NAV = [
   { id: "library",  to: "/materials", label: "Material library",  icon: Gem },
   { id: "machines", to: "/machines",  label: "Machines & rates",  icon: Settings2 },
+  { id: "bops",     to: "/bops",      label: "BOPs",              icon: Package },
 ];
 
 interface SidebarProps {

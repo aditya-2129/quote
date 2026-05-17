@@ -13,7 +13,7 @@ The app helps a manufacturing shop turn customer CAD into a quote. The core loop
 
 ## Core Terms
 
-- RFQ: Request for quote. Commercial context from a customer, including customer name, project, and reference.
+- RFQ / Inquiry: Request for quote. Displayed as "Inquiry" / "Inquiries" throughout the UI, but the internal code, DB table (`rfqs`), TypeScript types (`Rfq`, `NewRfq`), and field names (`rfqRef`, `rfqId`) all use the `rfq` prefix. When working on this domain, treat "Inquiry" in the UI and `rfq` in code as the same concept.
 - Quote: Priced response for an RFQ. A quote can have revisions.
 - Assembly: The imported CAD model as a whole.
 - Body or mesh: A CAD body imported from OCCT and rendered in Three.js.
@@ -37,6 +37,11 @@ The app helps a manufacturing shop turn customer CAD into a quote. The core loop
 - Per-quote material and machine rate overrides are valid, but changing material/stock shape/machine should clear the override.
 - Quote cost rollup includes material, setup, machining, BOP subtotal, margin, and tax. Fixed tooling/inspection overheads and finishing cost are not currently charged.
 - Quote math should stay deterministic and local-first.
+
+## Nav Structure Notes
+
+- There is no standalone Parts page. The `parts` DB table and queries are used internally by `quoteWorkflowService` and the quote detail flow — parts are always scoped to a quote, not managed from a top-level nav item.
+- BOPs (brought-out parts catalog) lives under the Configure section of the sidebar, not Workspace.
 
 ## Current Open Product Edges
 

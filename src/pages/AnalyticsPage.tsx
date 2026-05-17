@@ -30,7 +30,7 @@ export function AnalyticsPage() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
             <StatCard 
-              title="Open RFQs" 
+              title="Open Inquiries"
               value={counts.rfqs.toString()} 
               icon={<Inbox size={20} />} 
               change="Needs review"

@@ -15,16 +15,16 @@ export function RfqsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1 className="page-title">RFQs</h1>
+        <h1 className="page-title">Inquiries</h1>
         <div className="page-sub">{rows.length} total</div>
         <div className="right" style={{ marginLeft: "auto" }}>
-          <button className="btn primary sm"><Plus size={14}/> New RFQ</button>
+          <button className="btn primary sm"><Plus size={14}/> New Inquiry</button>
         </div>
       </div>
       <div className="panel">
-        <div className="panel-head"><div className="title">All RFQs</div></div>
+        <div className="panel-head"><div className="title">All Inquiries</div></div>
         {loading ? <EmptyState text="Loading…" />
-          : rows.length === 0 ? <EmptyState text="No RFQs yet." icon={<Inbox size={24}/>} />
+          : rows.length === 0 ? <EmptyState text="No inquiries yet." icon={<Inbox size={24}/>} />
           : (
             <table className="data-table">
               <thead>

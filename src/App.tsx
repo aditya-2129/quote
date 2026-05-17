@@ -7,7 +7,6 @@ import {
   RfqsPage,
   QuotesPage,
   QuoteDetailPage,
-  PartsPage,
   CustomersPage,
   BopsPage,
   AnalyticsPage,
@@ -37,7 +36,6 @@ function App() {
             <Route index element={<QuoteDetailPage />} />
             <Route path="viewer" element={<Navigate to="/viewer" replace />} />
           </Route>
-          <Route path="/parts" element={<PartsPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/bops" element={<BopsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />

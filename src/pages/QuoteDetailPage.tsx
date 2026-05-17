@@ -393,7 +393,7 @@ function buildQuotationData(args: {
         }, 0)
       : Math.round(bopGrand * share);
     const unitPrice = qty > 0 ? allocated / qty : 0;
-    const descBits = [bop.supplier].filter(Boolean).join(" � ");
+    const descBits = [bop.supplier].filter(Boolean).join(" � ");
     return {
       partNumber: bop.name,
       description: descBits ? `(Brought-out part — ${descBits})` : "(Brought-out part)",
@@ -1354,7 +1354,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
   return (
     <div className="panel rfq-panel">
       <div className="panel-head">
-        <span className="title">{rfq.rfqRef || quoteNumber || rfq.project || "RFQ"}</span>
+        <span className="title">{rfq.rfqRef || quoteNumber || rfq.project || "Inquiry"}</span>
         <div className="right">
           <span className={`chip ${persistenceStatus === "error" ? "" : "success"}`}>
             <span className="dot"/>
@@ -1376,7 +1376,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
                 onChange={customer => setRfq({ ...rfq, ...customer })}
               />
               <Field label="Project" value={rfq.project} onChange={v=>setRfq({...rfq, project:String(v)})}/>
-              <Field label="RFQ ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
+              <Field label="Inquiry ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
             </div>
             <div className="rfq-fields" style={{paddingTop:8}}>
               <div className="full"><div className="eyebrow">Commercial · whole quote</div></div>
