@@ -5,6 +5,8 @@ import {
   createPart,
   createQuote,
   createRfq,
+  deleteQuote,
+  deleteRfq,
   deleteOperation,
   deleteOperationsForPart,
   deletePart,
@@ -12,6 +14,7 @@ import {
   deletePartStock,
   getAllMachines,
   getAllMaterials,
+  getAllQuotes,
   getDfmIssuesByPart,
   getEventsByQuote,
   getOperationsByPart,
@@ -20,6 +23,8 @@ import {
   getPartsByQuote,
   getPartStock,
   getQuoteById,
+  getQuoteCadSource,
+  getRootQuotes,
   getRfqById,
   logQuoteEvent,
   updateOperation,
@@ -28,11 +33,13 @@ import {
   updateRfq,
   upsertPartGeometry,
   upsertPartStock,
+  upsertQuoteCadSource,
 } from "./queries";
 import type {
   DfmIssue,
   DfmSeverity,
   PartGeometry,
+  ProjectNameSource,
   Quote,
   QuoteCostSnapshot,
   QuoteEvent,
@@ -91,6 +98,11 @@ export type QuoteWorkflowPartDraft = Part & {
   dfmIssues?: QuoteWorkflowDfmIssueDraft[];
 };
 
+export type QuoteWorkflowCadSource = {
+  bytes: Uint8Array;
+  fileName: string;
+};
+
 export type QuoteWorkflowDraft = {
   quoteId?: string | null;
   rfqId?: string | null;
@@ -105,6 +117,10 @@ export type QuoteWorkflowDraft = {
   costSnapshot?: QuoteCostSnapshot | null;
   dfmIssues?: QuoteWorkflowDfmIssueDraft[];
   fileName?: string;
+  /** 'auto' = title was generated (file name / 'Untitled quote N'); 'user' = typed by hand. Drives whether a CAD attach is allowed to overwrite the title. */
+  projectNameSource?: ProjectNameSource | null;
+  /** Source STEP bytes — persisted per quote so the 3D preview survives reloads. */
+  cadSource?: QuoteWorkflowCadSource | null;
 };
 
 export type LoadedQuoteWorkflow = QuoteWorkflowDraft & {
@@ -115,12 +131,21 @@ export type LoadedQuoteWorkflow = QuoteWorkflowDraft & {
     quote: Quote;
     events: QuoteEvent[];
   };
+  cadSource: QuoteWorkflowCadSource | null;
 };
 
 export type SaveQuoteWorkflowResult = {
   rfq: Rfq;
   quote: Quote;
   draft: LoadedQuoteWorkflow;
+};
+
+export type DuplicateDraftCleanupResult = {
+  groupsScanned: number;
+  duplicateGroups: number;
+  deletedCount: number;
+  keptQuoteIds: string[];
+  deletedQuoteIds: string[];
 };
 
 type PartNotesMeta = {
@@ -142,6 +167,23 @@ const META_KEY = "quoteWorkflow";
 function cleanTitle(project: string | undefined): string {
   const title = project?.trim();
   return title ? title : "Untitled quote";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Chunked to keep String.fromCharCode under the call-stack limit for multi-MB files.
+  const CHUNK = 0x8000;
+  let s = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(s);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 function finiteNumber(value: number | undefined, fallback = 0): number {
@@ -412,18 +454,25 @@ export async function saveQuoteWorkflow(
 ): Promise<SaveQuoteWorkflowResult> {
   const title = cleanTitle(draft.rfq.project);
   const [materials, machines] = await Promise.all([getAllMaterials(false), getAllMachines(false)]);
-  const costSnapshot = draft.costSnapshot ?? toQuoteCostSnapshot(calculateQuoteRollup(
-    draft.parts,
-    Math.max(1, Math.trunc(finiteNumber(draft.asmQty, 1))),
-    { marginPct: finiteNumber(draft.commercial.marginPct), taxPct: finiteNumber(draft.commercial.taxPct) },
-    buildMaterialCatalog(materials),
-    buildMachineCatalog(machines),
-    {
-      toolingCost: finiteNumber(draft.toolingCost),
-      inspectionCost: finiteNumber(draft.inspectionCost),
-      currency: draft.currency ?? "INR",
-    },
-  ));
+  const matCat = buildMaterialCatalog(materials);
+  const macCat = buildMachineCatalog(machines);
+  const asm = Math.max(1, Math.trunc(finiteNumber(draft.asmQty, 1)));
+  const terms = { marginPct: finiteNumber(draft.commercial.marginPct), taxPct: finiteNumber(draft.commercial.taxPct) };
+  // Only apply per-batch tooling/inspection when included parts have non-zero
+  // configured cost (material + ops). Blank drafts and just-added empty parts
+  // should report ₹0 instead of the ₹570 default overhead baseline.
+  const probe = calculateQuoteRollup(draft.parts, asm, terms, matCat, macCat, {
+    toolingCost: 0, inspectionCost: 0, currency: draft.currency ?? "INR",
+  });
+  const costSnapshot = draft.costSnapshot ?? toQuoteCostSnapshot(
+    probe.partsCost > 0
+      ? calculateQuoteRollup(draft.parts, asm, terms, matCat, macCat, {
+          toolingCost: finiteNumber(draft.toolingCost),
+          inspectionCost: finiteNumber(draft.inspectionCost),
+          currency: draft.currency ?? "INR",
+        })
+      : probe,
+  );
   const rfq = draft.rfqId
     ? await updateRfq(draft.rfqId, {
         customerId: draft.rfq.customerId ?? null,
@@ -444,6 +493,13 @@ export async function saveQuoteWorkflow(
 
   if (!rfq) throw new Error(`RFQ not found: ${draft.rfqId}`);
 
+  // Only persist projectNameSource when it's explicitly set on the draft —
+  // omitting the column from an update preserves the existing value so a save
+  // triggered by edits unrelated to the Project field doesn't clobber it.
+  const projectNameSourcePatch = draft.projectNameSource !== undefined
+    ? { projectNameSource: draft.projectNameSource }
+    : {};
+
   const quote = draft.quoteId
     ? await updateQuote(draft.quoteId, {
         rfqId: rfq.id,
@@ -458,6 +514,7 @@ export async function saveQuoteWorkflow(
         taxPercent: finiteNumber(draft.commercial.taxPct),
         discountPercent: finiteNumber(draft.commercial.discountPct),
         costSnapshot,
+        ...projectNameSourcePatch,
       })
     : await createQuote({
         rfqId: rfq.id,
@@ -465,6 +522,8 @@ export async function saveQuoteWorkflow(
         parentQuoteId: null,
         revision: "A",
         title,
+        // Fresh inserts default to 'auto' unless the caller specified otherwise.
+        projectNameSource: draft.projectNameSource ?? "auto",
         quoteNumber: null,
         status: "draft",
         assemblyQuantity: Math.max(1, Math.trunc(finiteNumber(draft.asmQty, 1))),
@@ -497,6 +556,7 @@ export async function saveQuoteWorkflow(
     } catch (error) {
       throw new Error(
         `Failed to save part "${part.name}" (${part.id}): ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   }
@@ -510,6 +570,14 @@ export async function saveQuoteWorkflow(
   }
   for (const part of normalized.parts) {
     await replaceDfmIssues(part.id, part.dfmIssues ?? dfmByPartId.get(part.id));
+  }
+
+  if (draft.cadSource && draft.cadSource.bytes.length > 0) {
+    await upsertQuoteCadSource({
+      quoteId: quote.id,
+      fileName: draft.cadSource.fileName,
+      fileBytesBase64: bytesToBase64(draft.cadSource.bytes),
+    });
   }
 
   await logQuoteEvent({
@@ -551,6 +619,11 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     parts.push(part);
   }
 
+  const cadSourceRow = await getQuoteCadSource(quote.id);
+  const cadSource: QuoteWorkflowCadSource | null = cadSourceRow
+    ? { bytes: base64ToBytes(cadSourceRow.fileBytesBase64), fileName: cadSourceRow.fileName }
+    : null;
+
   return {
     quoteId: quote.id,
     rfqId: quote.rfqId,
@@ -573,7 +646,9 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     inspectionCost: quote.inspectionCost,
     quantityBreaks: quote.quantityBreaks,
     costSnapshot: quote.costSnapshot,
+    projectNameSource: quote.projectNameSource ?? null,
     dfmIssues,
+    cadSource,
     records: {
       rfq,
       quote,
@@ -591,4 +666,203 @@ export async function deleteQuoteWorkflowChildren(quoteId: string): Promise<void
     await deletePartGeometry(part.id);
     await deletePart(part.id);
   }
+}
+
+export async function deleteQuoteWorkflow(quoteId: string): Promise<void> {
+  const quote = await getQuoteById(quoteId);
+  await deleteQuoteWorkflowChildren(quoteId);
+  await deleteQuote(quoteId);
+  if (quote?.rfqId) {
+    const siblingQuotes = (await getRootQuotes()).filter(row => row.rfqId === quote.rfqId);
+    if (siblingQuotes.length === 0) await deleteRfq(quote.rfqId);
+  }
+}
+
+function duplicateDraftSignature(draft: LoadedQuoteWorkflow): string {
+  const cost = draft.costSnapshot;
+  return JSON.stringify({
+    title: draft.records.quote.title,
+    status: draft.records.quote.status,
+    quoteNumber: draft.records.quote.quoteNumber,
+    revision: draft.records.quote.revision,
+    asmQty: draft.asmQty,
+    commercial: draft.commercial,
+    currency: draft.currency,
+    toolingCost: draft.toolingCost,
+    inspectionCost: draft.inspectionCost,
+    costSnapshot: cost ? {
+      partsCost: cost.partsCost,
+      tooling: cost.tooling,
+      inspection: cost.inspection,
+      subtotal: cost.subtotal,
+      margin: cost.margin,
+      tax: cost.tax,
+      total: cost.total,
+      unitPrice: cost.unitPrice,
+      currency: cost.currency,
+    } : null,
+    parts: draft.parts.map(part => ({
+      name: part.name,
+      material: part.material,
+      perAssembly: part.perAssembly,
+      mass: part.mass,
+      netVolumeMm3: part.netVolumeMm3,
+      finishing: part.finishing,
+      included: part.included,
+      stocked: part.stocked,
+      stock: part.stock,
+      operations: part.operations.map(op => ({
+        machine: op.machine,
+        setupMin: op.setupMin,
+        cycleMin: op.cycleMin,
+        rateOverride: op.rateOverride,
+      })),
+    })),
+  });
+}
+
+export async function cleanupDuplicateDraftQuotes(): Promise<DuplicateDraftCleanupResult> {
+  const rootQuotes = await getRootQuotes();
+  const candidates = rootQuotes.filter(quote =>
+    quote.status === "draft"
+    && quote.parentQuoteId === null
+    && quote.quoteNumber === null
+    && quote.title === "Untitled quote",
+  );
+
+  const groups = new Map<string, LoadedQuoteWorkflow[]>();
+  for (const quote of candidates) {
+    const draft = await loadQuoteWorkflow(quote.id);
+    const key = duplicateDraftSignature(draft);
+    groups.set(key, [...(groups.get(key) ?? []), draft]);
+  }
+
+  const deletedQuoteIds: string[] = [];
+  const keptQuoteIds: string[] = [];
+  let duplicateGroups = 0;
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    duplicateGroups++;
+    const sorted = [...group].sort(
+      (a, b) => b.records.quote.updatedAt.getTime() - a.records.quote.updatedAt.getTime(),
+    );
+    const keep = sorted[0]!;
+    keptQuoteIds.push(keep.quoteId);
+    for (const duplicate of sorted.slice(1)) {
+      await deleteQuoteWorkflow(duplicate.quoteId);
+      deletedQuoteIds.push(duplicate.quoteId);
+    }
+  }
+
+  return {
+    groupsScanned: groups.size,
+    duplicateGroups,
+    deletedCount: deletedQuoteIds.length,
+    keptQuoteIds,
+    deletedQuoteIds,
+  };
+}
+
+/**
+ * Returns the next 'Untitled quote N' name by scanning every quote title for
+ * the `^Untitled quote (\d+)$` pattern and taking max+1. Starts at 1. Legacy
+ * rows whose title is the bare 'Untitled quote' (no number) don't participate
+ * in the count (they were back-filled to source='auto' and will be renamed in
+ * place if the user attaches a CAD file).
+ */
+export async function nextUntitledQuoteName(): Promise<string> {
+  const quotes = await getAllQuotes();
+  const numberedPattern = /^Untitled quote (\d+)$/;
+  let maxN = 0;
+  for (const q of quotes) {
+    const m = numberedPattern.exec(q.title ?? "");
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > maxN) maxN = n;
+    }
+  }
+  return `Untitled quote ${maxN + 1}`;
+}
+
+/**
+ * Creates a real persisted blank draft row so the New Quote button can navigate
+ * straight to /quotes/<real-id>. Without this, the URL holds a fake `q-<rand>`
+ * id and the QuoteStateProvider gets remounted on the first autosave (losing
+ * anything the user typed between save and remount).
+ *
+ * Assigns the auto-generated 'Untitled quote N' name up front so the page
+ * header, sidebar, and quote-list all show a stable label from the start.
+ */
+export async function createBlankQuoteWorkflow(options: {
+  asmQty?: number;
+  commercial?: QuoteWorkflowCommercialDraft;
+} = {}): Promise<string> {
+  const project = await nextUntitledQuoteName();
+  const result = await saveQuoteWorkflow({
+    quoteId: null,
+    rfqId: null,
+    rfq: { project },
+    parts: [],
+    asmQty: options.asmQty ?? 25,
+    commercial: options.commercial ?? { marginPct: 18, taxPct: 0 },
+    toolingCost: 244,
+    inspectionCost: 326,
+    projectNameSource: "auto",
+  });
+  return result.quote.id;
+}
+
+function pad3(n: number): string { return n.toString().padStart(3, "0"); }
+
+/**
+ * Allocates the next sequential quote number for the current 2-digit year.
+ * Format: Q-{YY}-{NNN}. Looks at every existing quote (across revisions) to
+ * find the highest in-year sequence and increments it.
+ */
+async function allocateQuoteNumber(): Promise<string> {
+  const yy = new Date().getFullYear().toString().slice(-2);
+  const prefix = `Q-${yy}-`;
+  const all = await getAllQuotes();
+  let max = 0;
+  for (const q of all) {
+    if (!q.quoteNumber || !q.quoteNumber.startsWith(prefix)) continue;
+    const n = parseInt(q.quoteNumber.slice(prefix.length), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return `${prefix}${pad3(max + 1)}`;
+}
+
+export type SendQuoteResult = { quote: Quote; quoteNumber: string };
+
+/**
+ * Transitions a draft into "sent": assigns a quote number if missing, flips
+ * status, and writes a status_changed/sent event pair to history.
+ */
+export async function sendQuoteWorkflow(quoteId: string): Promise<SendQuoteResult> {
+  const quote = await getQuoteById(quoteId);
+  if (!quote) throw new Error(`Quote not found: ${quoteId}`);
+
+  let quoteNumber = quote.quoteNumber;
+  if (!quoteNumber) quoteNumber = await allocateQuoteNumber();
+
+  const previousStatus = quote.status;
+  const updated = await updateQuote(quoteId, {
+    quoteNumber,
+    status: "sent",
+  });
+  if (!updated) throw new Error(`Quote not found after send: ${quoteId}`);
+
+  await logQuoteEvent({
+    quoteId,
+    eventType: "status_changed",
+    payload: { from: previousStatus, to: "sent", quoteNumber },
+  });
+  await logQuoteEvent({
+    quoteId,
+    eventType: "sent",
+    payload: { quoteNumber },
+  });
+
+  return { quote: updated, quoteNumber };
 }

@@ -8,6 +8,7 @@ export * from "./part_geometry";
 export * from "./part_operations";
 export * from "./part_stock";
 export * from "./parts";
+export * from "./quote_cad_sources";
 export * from "./quote_events";
 export * from "./quotes";
 export * from "./recent_files";

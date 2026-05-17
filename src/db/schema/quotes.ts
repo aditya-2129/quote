@@ -3,6 +3,7 @@ import { customers } from "./customers";
 import { rfqs } from "./rfqs";
 
 export type QuoteStatus = "draft" | "review" | "sent" | "won" | "lost" | "expired";
+export type ProjectNameSource = "auto" | "user";
 
 export interface QuoteCostSnapshot {
   partsCost: number;
@@ -27,6 +28,8 @@ export const quotes = sqliteTable(
     parentQuoteId: text("parent_quote_id").references((): AnySQLiteColumn => quotes.id, { onDelete: "set null" }),
     revision: text("revision").notNull().default("A"),
     title: text("title").notNull(),
+    /** Tracks whether `title` was set by the user or auto-generated (file name / Untitled N). 'auto' values are safe to overwrite on subsequent file attaches; 'user' values are preserved. */
+    projectNameSource: text("project_name_source").$type<ProjectNameSource>(),
     /** Shared across revisions of the same quote (e.g. Q-026-014). (quote_number, revision) is unique. */
     quoteNumber: text("quote_number"),
     status: text("status").$type<QuoteStatus>().notNull().default("draft"),

@@ -1,18 +1,11 @@
 # Quote App — Unimplemented Features
 
-> Audit date: 2026-05-16. All items below render in the UI but have no logic yet.
-
----
-
-## High Priority
-
-- [ ] **Save button** — persist current quote (parts, ops, stock, commercial) to localStorage via `src/utils/storage.ts` (or Drizzle via `src/db/queries/quotes.ts`).
+> Audit date: 2026-05-17. All items below render in the UI but have no logic yet.
 
 ---
 
 ## Medium Priority
 
-- [ ] **Export PDF button** — generate a printable quote sheet. Logic stub exists in `src/utils/export.ts`.
 - [ ] **Send button** — open an email/share modal with quote summary.
 - [ ] **Add part button** — append a new blank row to the parts table.
 - [ ] **Per-row More options (⋯) button** — context menu: rename, duplicate, delete part.
@@ -51,6 +44,11 @@
 - [x] Sidebar collapse button
 - [x] Tauri window controls (minimize / maximize / close)
 - [x] Workspace toggle (Viewer / Quote, keyboard V / Q)
+
+### Done since 2026-05-17
+
+- [x] **Save button** — full quote persistence via `src/db/quoteWorkflowService.ts` with debounced autosave through `QuoteStateContext`; SQLite/Drizzle backend with browser fallback (moved from High)
+- [x] **Export PDF button** — Kaivalya-style quotation PDF via `src/utils/export.ts` (pdf-lib): bordered header, bill-to + meta split, items table, grand total + rupees-in-words, terms + drawing placeholder + signature, contact footer (moved from Medium)
 
 ### Done since 2026-05-14
 

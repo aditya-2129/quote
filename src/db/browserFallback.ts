@@ -10,6 +10,7 @@ import type {
   NewPartOperation,
   NewPartStock,
   NewQuote,
+  NewQuoteCadSource,
   NewQuoteEvent,
   NewRfq,
   Part,
@@ -17,6 +18,7 @@ import type {
   PartOperation,
   PartStock,
   Quote,
+  QuoteCadSource,
   QuoteEvent,
   QuoteStatus,
   Rfq,
@@ -35,6 +37,7 @@ type BrowserDb = {
   partOperations: PartOperation[];
   parts: Part[];
   partStock: PartStock[];
+  quoteCadSources: QuoteCadSource[];
   quoteEvents: QuoteEvent[];
   quotes: Quote[];
   rfqs: Rfq[];
@@ -107,6 +110,7 @@ const initialDb: BrowserDb = {
       parentQuoteId: null,
       revision: "C",
       title: "Pump Manifold v3",
+      projectNameSource: "user",
       quoteNumber: "Q-026-014",
       status: "draft",
       assemblyQuantity: 25,
@@ -127,6 +131,7 @@ const initialDb: BrowserDb = {
   quoteEvents: [
     { id: "event-demo-created", quoteId: "quote-demo", eventType: "created", payload: { source: "browser-fallback" }, createdAt: seedDate },
   ],
+  quoteCadSources: [],
 };
 
 function reviveDates<T>(value: T): T {
@@ -182,6 +187,7 @@ function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
   }
   db.parts = db.parts.filter(row => row.quoteId !== quoteId);
   db.quoteEvents = db.quoteEvents.filter(row => row.quoteId !== quoteId);
+  db.quoteCadSources = db.quoteCadSources.filter(row => row.quoteId !== quoteId);
 }
 
 function deletePartsForQuoteRows(db: BrowserDb, quoteId: string): void {
@@ -456,6 +462,32 @@ export const browserDb = {
     writeDb(db);
   },
 
+  getQuoteCadSource(quoteId: string): QuoteCadSource | null {
+    return readDb().quoteCadSources.find(row => row.quoteId === quoteId) ?? null;
+  },
+  upsertQuoteCadSource(data: Omit<NewQuoteCadSource, "id" | "importedAt">): QuoteCadSource {
+    const db = readDb();
+    const index = db.quoteCadSources.findIndex(row => row.quoteId === data.quoteId);
+    if (index >= 0) {
+      db.quoteCadSources[index] = { ...db.quoteCadSources[index]!, ...data };
+      writeDb(db);
+      return db.quoteCadSources[index]!;
+    }
+    const row: QuoteCadSource = {
+      ...data,
+      id: newId("cadsrc"),
+      importedAt: now(),
+    };
+    db.quoteCadSources.push(row);
+    writeDb(db);
+    return row;
+  },
+  deleteQuoteCadSource(quoteId: string): void {
+    const db = readDb();
+    db.quoteCadSources = db.quoteCadSources.filter(row => row.quoteId !== quoteId);
+    writeDb(db);
+  },
+
   getOperationsByPart(partId: string): PartOperation[] {
     return readDb().partOperations.filter(row => row.partId === partId).sort(bySortOrder);
   },
@@ -578,6 +610,7 @@ export const browserDb = {
       parentQuoteId: null,
       revision: "A",
       quoteNumber: null,
+      projectNameSource: null,
       status: "draft",
       assemblyQuantity: 1,
       quantityBreaks: [1, 10, 25, 100, 250],

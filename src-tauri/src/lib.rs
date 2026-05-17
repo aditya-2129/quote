@@ -15,6 +15,18 @@ pub fn run() {
       sql: include_str!("../migrations/0002_scrub_undefined_json.sql"),
       kind: MigrationKind::Up,
     },
+    Migration {
+      version: 3,
+      description: "quote_cad_sources",
+      sql: include_str!("../migrations/0003_quote_cad_sources.sql"),
+      kind: MigrationKind::Up,
+    },
+    Migration {
+      version: 4,
+      description: "project_name_source",
+      sql: include_str!("../migrations/0004_project_name_source.sql"),
+      kind: MigrationKind::Up,
+    },
   ];
 
   tauri::Builder::default()

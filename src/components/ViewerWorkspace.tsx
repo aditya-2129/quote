@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import {
@@ -32,6 +32,7 @@ import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult } from "@utils/index";
 import { analyzeShape, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
 import { useCad } from "@context/CadContext";
+import { createBlankQuoteWorkflow } from "../db/quoteWorkflowService";
 
 export function ViewerWorkspace({ cad, isImporting, onFile }: {
   cad: CadImportResult | null;
@@ -39,8 +40,14 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   onFile: (file?: File) => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // When opened from a specific quote (via "Open viewer" on the quote page),
+  // route "Move to Quotation" back to that quote so the user can attach CAD
+  // to the quote they were already editing instead of spawning a new one.
+  const sourceQuoteId = searchParams.get("from");
   const { requestHandoff } = useCad();
   const viewerRef = useRef<CadViewerHandle | null>(null);
+  const [isMovingToQuote, setIsMovingToQuote] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [displayMode, setDisplayMode] = useState<"solid" | "wireframe">("solid");
@@ -176,6 +183,27 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
 
   const geo = cad?.geometry;
 
+  const handleMoveToQuote = useCallback(async () => {
+    if (!cad || isMovingToQuote) return;
+
+    if (sourceQuoteId) {
+      requestHandoff();
+      navigate(`/quotes/${encodeURIComponent(sourceQuoteId)}`);
+      return;
+    }
+
+    setIsMovingToQuote(true);
+    try {
+      const quoteId = await createBlankQuoteWorkflow();
+      requestHandoff();
+      navigate(`/quotes/${encodeURIComponent(quoteId)}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to create quote.");
+    } finally {
+      setIsMovingToQuote(false);
+    }
+  }, [cad, isMovingToQuote, navigate, requestHandoff, sourceQuoteId]);
+
   return (
     <div className="viewer-grid">
       {/* Left panel */}
@@ -233,10 +261,11 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             <button
               className="btn"
               style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, fontWeight: 600 }}
-              onClick={() => { requestHandoff(); navigate(`/quotes/q-${Date.now().toString(36)}`); }}
+              onClick={() => void handleMoveToQuote()}
+              disabled={isMovingToQuote}
             >
               <ReceiptText size={14} />
-              Move to Quotation
+              {isMovingToQuote ? "Creating quote..." : sourceQuoteId ? "Attach to quotation" : "Move to Quotation"}
             </button>
           </div>
         )}

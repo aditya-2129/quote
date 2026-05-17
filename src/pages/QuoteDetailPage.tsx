@@ -11,8 +11,7 @@ import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
 import type { Part, Op, Stock } from "@utils/quoteTypes";
-import type { QuoteCalculation } from "../types";
-import { exportQuotationPdf } from "@utils/export";
+import { exportQuotationPdf, type QuotationData, type QuotationLineItem } from "@utils/export";
 import { QuotePreviewViewer, type QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
 import type { CadImportResult } from "@utils/index";
 import {
@@ -27,11 +26,10 @@ import {
   Cog,
   Copy,
   ExternalLink,
-  FileDown,
+  FileText,
   Info,
   Layers,
   Lightbulb,
-  Minus,
   OctagonX,
   Package,
   Percent,
@@ -44,7 +42,7 @@ import {
   ShieldCheck,
   Sliders,
   Square,
-  Truck,
+  Trash2,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -53,7 +51,6 @@ import { dismissDfmIssue, getAllMaterials, getAllMachines, logQuoteEvent } from 
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
-  buildQuantityBreaks,
   calculateQuoteRollup,
   effectivePartRate,
   materialRate,
@@ -244,6 +241,13 @@ function partSubtotal(p: Part, asmQty: number): number {
 }
 
 function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; taxPct:number }) {
+  // Apply per-batch tooling/inspection only after a part has real configured
+  // cost (material + ops). Otherwise an empty/just-added part would show
+  // overhead totals like ₹672 even when its own material/machining is ₹0.
+  const probe = calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
+    toolingCost: 0, inspectionCost: 0,
+  });
+  if (probe.partsCost <= 0) return probe;
   return calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
     toolingCost: TOOLING_BATCH,
     inspectionCost: INSPECTION_BATCH,
@@ -253,7 +257,6 @@ function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; t
 function fmtINR(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtINR0(n: number) { return "₹"+n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:0}); }
 function fmtMin(n: number) { return n.toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:1}); }
-function fmtPct(n: number) { return (n>=0?"+":"")+n.toFixed(1)+"%"; }
 
 function fmtStockDims(stock: Stock): string {
   const d = stock.dims || {};
@@ -266,14 +269,50 @@ function fmtStockDims(stock: Stock): string {
   }
 }
 
-function addBusinessDays(start: Date, n: number): Date {
-  const d = new Date(start); let added = 0;
-  while (added<n) { d.setDate(d.getDate()+1); const dow=d.getDay(); if (dow!==0&&dow!==6) added++; }
-  return d;
+function isTauriRuntime(): boolean {
+  const g = globalThis as typeof globalThis & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown };
+  return Boolean(g.__TAURI__ || g.__TAURI_INTERNALS__);
 }
-function fmtShipDate(d: Date) { return d.toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short"}); }
 
-function downloadBytes(fileName: string, bytes: Uint8Array, mimeType: string) {
+// Returns true if the file was saved (or a fallback download triggered),
+// false if the user cancelled the save dialog.
+async function downloadBytes(fileName: string, bytes: Uint8Array, mimeType: string): Promise<boolean> {
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+  const extLabel = ext === "pdf" ? "PDF Document" : ext.toUpperCase() || "File";
+
+  if (isTauriRuntime()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeFile } = await import("@tauri-apps/plugin-fs");
+    const filePath = await save({
+      title: "Save quotation",
+      defaultPath: fileName,
+      filters: ext ? [{ name: extLabel, extensions: [ext] }] : undefined,
+    });
+    if (!filePath) return false;
+    await writeFile(filePath, bytes);
+    return true;
+  }
+
+  // Browser fallback — use the File System Access API when available so the
+  // user still gets a save-as dialog instead of a silent Downloads dump.
+  const picker = (window as Window & { showSaveFilePicker?: (opts: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
+  if (typeof picker === "function") {
+    try {
+      const handle = await picker({
+        suggestedName: fileName,
+        types: ext ? [{ description: extLabel, accept: { [mimeType]: [`.${ext}`] } }] : undefined,
+      });
+      const writable = await (handle as FileSystemFileHandle & { createWritable: () => Promise<FileSystemWritableFileStream> }).createWritable();
+      await writable.write(new Uint8Array(bytes).buffer as ArrayBuffer);
+      await writable.close();
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return false;
+      throw error;
+    }
+  }
+
+  // Last-resort fallback for browsers without showSaveFilePicker: native auto-download.
   const blob = new Blob([new Uint8Array(bytes).buffer as ArrayBuffer], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -283,100 +322,142 @@ function downloadBytes(fileName: string, bytes: Uint8Array, mimeType: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+  return true;
 }
 
-function exportCalculationFromQuote(args: {
+// Issuing-company info shown on the quotation. Replace with real values when the
+// app gains a settings screen; this is the only place to edit branding today.
+const COMPANY_INFO = {
+  name: "KAIVALYA ENGINEERING",
+  addressLines: ["Pavana Industrial Premises, Bhoseri, PCMC, Pune 411044"],
+  phone: "9527352858",
+  email: "info@kaivalya.co.in",
+  gstn: "27AAKPF1080D1Z4",
+  state: "Maharashtra",
+  stateCode: "27",
+  tagline: "Manufacturing & Supply of SPM, Precision Tools, Die & Components",
+  contactPerson: "Mr. Vijay More",
+  contactPhone: "9011025799",
+  contactEmail: "info@kaivalya.co.in",
+};
+
+const QUOTATION_TERMS = [
+  "E. & O.E.",
+  "Delivery Period: As mention on PO from the order date and advance.",
+  "Payment Terms: As mutually agreed and finalized with the company.",
+  "Taxes & Duties: GST @ 18% extra as applicable.",
+  "Freight: Charged extra at actuals.",
+];
+
+function fmtQuotationDate(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+function partUnitLabel(part: Part): string {
+  return (part.perAssembly || 1) > 1 ? "Set" : "Nos";
+}
+
+function partDescription(part: Part): string {
+  const material = MATERIALS[part.material];
+  const bits: string[] = [];
+  if (material?.label) bits.push(material.label);
+  if (part.stock) bits.push(fmtStockDims(part.stock));
+  if (part.finishing > 0) bits.push(`Finishing ₹${part.finishing}/unit`);
+  if (part.operations.length > 0) {
+    const ops = part.operations
+      .map(op => MACHINES[op.machine]?.short || MACHINES[op.machine]?.label || op.machine)
+      .filter(Boolean)
+      .join(" • ");
+    if (ops) bits.push(`Process: ${ops}`);
+  }
+  return bits.length > 0
+    ? `(Complete as per model provided. ${bits.join(" · ")})`
+    : "(Complete as per model provided, precision finished & work suitable)";
+}
+
+function buildQuotationData(args: {
   rfq: { customer: string; project: string; rfqRef: string; notes: string };
   parts: Part[];
   asmQty: number;
   commercial: { marginPct: number; taxPct: number };
-}): QuoteCalculation {
+  quoteNumber: string | null;
+}): QuotationData {
   const included = args.parts.filter(p => p.included);
-  const firstPart = included[0] ?? args.parts[0];
   const totals = rollup(args.parts, args.asmQty, args.commercial);
-  const partRows = included.map(p => `${p.name} x ${partQty(p, args.asmQty)}`).join(", ");
-  const partName = included.length > 1 ? `${included.length} quoted parts` : firstPart?.name ?? "Quoted parts";
-  const materialId = firstPart?.material || "material";
-  const material = MATERIALS[materialId];
-  const geometry = (firstPart as Part & { geometry?: { bboxXMm?: number; bboxYMm?: number; bboxZMm?: number; volumeMm3?: number; surfaceAreaMm2?: number; faceCount?: number; edgeCount?: number; vertexCount?: number } }).geometry;
-  const volumeMm3 = geometry?.volumeMm3 ?? firstPart?.netVolumeMm3 ?? 0;
-  const surfaceAreaMm2 = geometry?.surfaceAreaMm2 ?? 0;
+  const grandTotal = Math.round(totals.total);
+
+  // Pro-rata allocation of overheads + margin + tax across parts, so the line
+  // items sum to grandTotal regardless of per-part composition.
+  const partRaw = included.map(part => ({
+    part,
+    raw:
+      partMaterialCost(part, args.asmQty) +
+      partMachineCost(part, args.asmQty) +
+      partFinishCost(part, args.asmQty),
+  }));
+  const rawSum = partRaw.reduce((s, p) => s + p.raw, 0);
+
+  const items: QuotationLineItem[] = partRaw.map(({ part, raw }, idx) => {
+    const qty = partQty(part, args.asmQty);
+    const share = rawSum > 0 ? raw / rawSum : 1 / Math.max(1, partRaw.length);
+    let allocated = idx === partRaw.length - 1
+      ? grandTotal - partRaw.slice(0, idx).reduce((s, p) => {
+          const sh = rawSum > 0 ? p.raw / rawSum : 1 / Math.max(1, partRaw.length);
+          return s + Math.round(grandTotal * sh);
+        }, 0)
+      : Math.round(grandTotal * share);
+    if (!Number.isFinite(allocated) || allocated < 0) allocated = 0;
+    const unitPrice = qty > 0 ? allocated / qty : 0;
+    const materialLabel = MATERIALS[part.material]?.label || part.material;
+    return {
+      partNumber: part.name,
+      description: partDescription(part),
+      materialNote: materialLabel ? `Job Material – ${materialLabel}` : "Job Material – As required",
+      qty,
+      unit: partUnitLabel(part),
+      unitPrice,
+      totalPrice: allocated,
+    };
+  });
+
+  const refLabel = args.quoteNumber || args.rfq.rfqRef || "DRAFT";
+  const customerAddress = args.rfq.project ? [args.rfq.project] : ["—"];
 
   return {
-    id: args.rfq.rfqRef || crypto.randomUUID(),
-    quoteNumber: args.rfq.rfqRef || "DRAFT-QUOTE",
-    customerName: args.rfq.customer,
-    projectName: args.rfq.project || "Untitled quote",
-    partName,
-    quantity: args.asmQty,
-    currency: "INR",
-    material: {
-      id: materialId,
-      name: material?.label ?? materialId,
-      densityKgPerM3: material?.density ?? 0,
-      costPerKg: getMaterialRate(materialId, firstPart?.stock?.shape),
-      currency: "INR",
+    company: {
+      name: COMPANY_INFO.name,
+      addressLines: COMPANY_INFO.addressLines,
+      phone: COMPANY_INFO.phone,
+      email: COMPANY_INFO.email,
+      gstn: COMPANY_INFO.gstn,
+      state: COMPANY_INFO.state,
+      stateCode: COMPANY_INFO.stateCode,
+      tagline: COMPANY_INFO.tagline,
     },
-    geometry: {
-      fileName: args.rfq.project || partName,
-      unitSystem: "metric",
-      boundingBoxMm: {
-        x: geometry?.bboxXMm ?? 0,
-        y: geometry?.bboxYMm ?? 0,
-        z: geometry?.bboxZMm ?? 0,
-      },
-      volumeMm3,
-      surfaceAreaMm2,
-      volumeCm3: volumeMm3 / 1000,
-      surfaceAreaCm2: surfaceAreaMm2 / 100,
-      boundingBoxVolumeMm3: (geometry?.bboxXMm ?? 0) * (geometry?.bboxYMm ?? 0) * (geometry?.bboxZMm ?? 0),
-      materialUtilizationPercent: firstPart ? (stockUtilization(firstPart) ?? 0) * 100 : 0,
-      longestDimensionMm: Math.max(geometry?.bboxXMm ?? 0, geometry?.bboxYMm ?? 0, geometry?.bboxZMm ?? 0),
-      shortestDimensionMm: Math.min(geometry?.bboxXMm ?? 0, geometry?.bboxYMm ?? 0, geometry?.bboxZMm ?? 0),
-      faceCount: geometry?.faceCount ?? 0,
-      edgeCount: geometry?.edgeCount ?? 0,
-      vertexCount: geometry?.vertexCount ?? 0,
+    customer: {
+      name: args.rfq.customer || "—",
+      addressLines: customerAddress,
     },
-    massKg: firstPart ? partNetMassKg(firstPart) : 0,
-    process: {
-      setupCost: totals.partsCost,
-      machineRatePerHour: 0,
-      machineTimeMinutes: 0,
-      laborRatePerHour: 0,
-      laborTimeMinutes: 0,
-      finishingCost: 0,
-      inspectionCost: totals.inspection,
-      toolingCost: totals.tooling,
+    meta: {
+      srNo: refLabel,
+      date: fmtQuotationDate(new Date()),
+      refNo: args.rfq.rfqRef,
+      validFor: "15 DAYS",
     },
-    taxPercent: args.commercial.taxPct,
-    marginPercent: args.commercial.marginPct,
-    discountPercent: 0,
-    costs: {
-      materialCost: included.reduce((sum, part) => sum + partMaterialCost(part, args.asmQty), 0),
-      setupCost: 0,
-      machineCost: included.reduce((sum, part) => sum + partMachineCost(part, args.asmQty), 0),
-      laborCost: 0,
-      finishingCost: included.reduce((sum, part) => sum + partFinishCost(part, args.asmQty), 0),
-      inspectionCost: totals.inspection,
-      toolingCost: totals.tooling,
-      subtotal: totals.subtotal,
-      discount: 0,
-      margin: totals.margin,
-      tax: totals.tax,
-      total: totals.total,
-      unitPrice: totals.unitPrice,
+    items,
+    grandTotal,
+    currencyLabel: "INR",
+    notes: args.rfq.notes,
+    terms: QUOTATION_TERMS,
+    contact: {
+      name: COMPANY_INFO.contactPerson,
+      phone: COMPANY_INFO.contactPhone,
+      email: COMPANY_INFO.contactEmail,
     },
-    createdAt: new Date().toISOString(),
-    notes: [args.rfq.notes, partRows ? `Parts: ${partRows}` : ""].filter(Boolean).join("\n\n"),
+    fileName: `${refLabel || "quotation"}.pdf`,
   };
-}
-
-function computeLeadTime(parts: Part[], asmQty: number) {
-  let totalMachineMin = 0;
-  parts.forEach(p=>{ if (!p.included) return; (p.operations||[]).forEach(op=>{ totalMachineMin+=opMinutes(op,partQty(p,asmQty)); }); });
-  const queue=3, machine=Math.max(2,Math.ceil(totalMachineMin/60/6)), finish=parts.some(p=>p.included&&p.finishing>0)?3:0, ship=2;
-  const total = queue+machine+finish+ship;
-  return { queue, machine, finish, ship, total, shipDate:addBusinessDays(new Date(),total) };
 }
 
 /* ===========================================================
@@ -397,50 +478,19 @@ function ShapeIcon({ shape, size=14 }: { shape:string; size?:number }) {
    Quote preview (SVG)
    =========================================================== */
 
-function QuotePreview({ parts, selectedId, onSelect, title }: { parts:Part[]; selectedId:string|null; onSelect:(id:string|null)=>void; title?:string }) {
-  const c30=Math.cos(Math.PI/6), s30=Math.sin(Math.PI/6);
-
-  function cuboid(id:string, cx:number, cy:number, w:number, h:number, d:number, topC:string, leftC:string, rightC:string) {
-    const half={x:(w/2)*c30,y:(w/2)*s30}, dep={x:(d/2)*c30,y:-(d/2)*s30};
-    const A=[cx-half.x-dep.x, cy-h/2-half.y-dep.y], B=[cx+half.x-dep.x, cy-h/2+half.y-dep.y];
-    const C=[cx+half.x+dep.x, cy-h/2+half.y+dep.y], D=[cx-half.x+dep.x, cy-h/2-half.y+dep.y];
-    const A2=[A[0],A[1]+h], B2=[B[0],B[1]+h], C2=[C[0],C[1]+h];
-    const part=parts.find(p=>p.id===id);
-    const isSel=selectedId===id, excluded=part&&!part.included, opacity=excluded?0.35:1;
-    const edge=isSel?"#2f4f7d":"#1e2734", sw=isSel?1.4:0.5;
-    const poly=(pts:number[][], fill:string)=><polygon points={pts.map(p=>p.join(",")).join(" ")} fill={fill} stroke={edge} strokeWidth={sw} strokeLinejoin="round"/>;
-    const issues=DFM_ISSUES.filter(i=>i.partId===id);
-    const worstSev=issues.reduce((acc:string,i)=>i.severity==="error"?"error":(acc==="error"?"error":(i.severity==="warn"?"warn":acc)),"info");
-    return (
-      <g key={id} data-part={id} onClick={e=>{e.stopPropagation();onSelect(id);}} style={{opacity,cursor:"pointer"}}>
-        {poly([A,B,C,D],topC)}{poly([A,B,B2,A2],leftC)}{poly([B,C,C2,B2],rightC)}
-        {isSel&&<rect x={Math.min(A[0],A2[0])-6} y={A[1]-6} width={Math.abs(C[0]-A[0])+12} height={h+Math.abs(C[1]-A[1])+12} fill="none" stroke="#2f4f7d" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" rx="2" pointerEvents="none"/>}
-        {issues.length>0&&<g pointerEvents="none"><circle cx={C[0]+6} cy={C[1]-2} r="7" fill={worstSev==="error"?"#b54a3b":worstSev==="warn"?"#b48241":"#5d80c9"}/><text x={C[0]+6} y={C[1]+1} textAnchor="middle" fontFamily="IBM Plex Mono" fontSize="9" fontWeight="600" fill="#fff">{issues.length}</text></g>}
-      </g>
-    );
-  }
-
+function QuotePreview({ onOpenViewer }: { onOpenViewer?: () => void }) {
   return (
-    <div className="canvas" style={{flex:1,minHeight:0}} onClick={()=>onSelect(null)}>
+    <div className="canvas" style={{flex:1,minHeight:0,display:"grid",placeItems:"center"}}>
       <div className="canvas-grid"/>
-      <div className="canvas-hud-top">
-        {title && <span className="pill"><Box size={11}/> {title}</span>}
-        <span className="pill">Click a body to edit</span>
-      </div>
-      <div style={{position:"absolute",inset:0,display:"grid",placeItems:"center"}}>
-        <svg viewBox="0 0 480 320" width="100%" height="100%" style={{maxWidth:460,maxHeight:300}}>
-          <defs><filter id="ds2" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" floodColor="#000" floodOpacity="0.10"/></filter></defs>
-          <g filter="url(#ds2)" transform="translate(0,30)">
-            {cuboid("body-base",240,215,230,24,120,"#c8d0db","#a8b1be","#8e98a6")}
-            {cuboid("body-mid", 240,170,150,38,80, "#d4dbe5","#b3bcc9","#97a1af")}
-            {cuboid("body-cap", 240,120,80, 26,44,  "#3b5a86","#2f4f7d","#24416b")}
-          </g>
-        </svg>
-      </div>
-      <div className="canvas-hud-bot">
-        <button className="zoom-btn"><Minus size={12}/></button>
-        <span className="zoom-val">100%</span>
-        <button className="zoom-btn"><Plus size={12}/></button>
+      <div className="empty-state" style={{position:"relative",padding:"22px 18px",textAlign:"center"}}>
+        <div className="es-ic"><Box size={20}/></div>
+        <div className="es-title">No CAD model attached</div>
+        <div className="es-hint" style={{maxWidth:280,margin:"4px auto 0"}}>Import a STEP file in the viewer to see the 3D model here. Manual parts can be added below without one.</div>
+        {onOpenViewer && (
+          <div style={{marginTop:12}}>
+            <button className="btn sm" onClick={onOpenViewer}><ExternalLink size={12}/> Open viewer</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -676,9 +726,10 @@ type RowProps = {
   onSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<Part>) => void;
   onToggleExpanded: (id: string) => void;
+  onDelete: (id: string) => void;
 };
 
-const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, onUpdate, onToggleExpanded }: RowProps) {
+const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, onUpdate, onToggleExpanded, onDelete }: RowProps) {
   const qty = partQty(p, asmQty);
   const sub = partSubtotal(p, asmQty);
   const ops = p.operations || [];
@@ -688,7 +739,13 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
     <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""} ${isExpanded?"row-expanded":""}`} onClick={() => onSelect(p.id)}>
       <td className="include-cell"><input type="checkbox" aria-label={`Include ${p.name} in quote`} checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
       <td><div className="body-cell"><span className="swatch" style={{background:p.color}}/><div style={{minWidth:0}}>
-        <div className="pname">{p.name}</div>
+        <input
+          className="pname pname-input"
+          aria-label="Part name"
+          value={p.name}
+          onClick={e=>e.stopPropagation()}
+          onChange={e=>onUpdate(p.id,{name:e.target.value})}
+        />
         <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
           {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{fmtStockDims(p.stock)}</span>}
         </div>
@@ -699,23 +756,34 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
       <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
       <td className="num">{p.included?fmtINR(sub):"—"}</td>
       <td>
-        <button
-          className="expand-toggle"
-          onClick={e=>{e.stopPropagation();onToggleExpanded(p.id);}}
-          title={isExpanded?"Hide machining operations":"Show machining operations"}
-          aria-expanded={isExpanded}
-        >
-          {isExpanded?<ChevronDown size={14}/>:<ChevronRight size={14}/>}
-        </button>
+        <div className="row-actions">
+          <button
+            className="row-delete"
+            onClick={e=>{e.stopPropagation();if(window.confirm(`Remove "${p.name}" from the quote?`))onDelete(p.id);}}
+            title={`Remove ${p.name}`}
+            aria-label={`Remove ${p.name}`}
+          >
+            <Trash2 size={13}/>
+          </button>
+          <button
+            className="expand-toggle"
+            onClick={e=>{e.stopPropagation();onToggleExpanded(p.id);}}
+            title={isExpanded?"Hide machining operations":"Show machining operations"}
+            aria-expanded={isExpanded}
+          >
+            {isExpanded?<ChevronDown size={14}/>:<ChevronRight size={14}/>}
+          </button>
+        </div>
       </td>
     </tr>
   );
 });
 
-function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery }: {
+function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAddPart, searchQuery }: {
   parts:Part[]; setParts:(p:Part[])=>void;
   asmQty:number; selectedId:string|null;
   onSelect:(id:string|null)=>void;
+  onAddPart:()=>void;
   searchQuery:string;
 }) {
   const [filter, setFilter] = useState<"all"|"machined"|"purchased"|"excluded">("all");
@@ -745,6 +813,14 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
     onSelectRef.current(id);
     setExpandedId(id);
   }, []);
+  const stableDelete = useCallback((id: string) => {
+    setPartsRef.current(partsRef.current.filter(p => p.id !== id));
+    setExpandedId(prev => prev === id ? null : prev);
+    if (onSelectRef.current && partsRef.current.find(p => p.id === id)) {
+      const remaining = partsRef.current.filter(p => p.id !== id);
+      onSelectRef.current(remaining[0]?.id ?? null);
+    }
+  }, []);
 
   const counts={included:parts.filter(p=>p.included).length,machined:parts.filter(p=>!p.stocked).length,purchased:parts.filter(p=>p.stocked).length,excluded:parts.filter(p=>!p.included).length};
   const q=searchQuery.trim().toLowerCase();
@@ -768,7 +844,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
       <div className="panel-head">
         <span className="title">Parts in quote</span>
         <span className="sub">{counts.included} of {parts.length} included · {asmQty} assemblies</span>
-        <div className="right"><button className="btn sm ghost"><Plus size={12}/> Add part</button></div>
+        <div className="right"><button className="btn sm ghost" onClick={onAddPart}><Plus size={12}/> Add part</button></div>
       </div>
       <div className="filter-bar">
         {(["all","machined","purchased"] as const).map(f=>(
@@ -800,7 +876,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
           <col style={{ width: "6%",  minWidth: 36 }} />
           <col style={{ width: "20%", minWidth: 90 }} />
           <col style={{ width: "17%", minWidth: 80 }} />
-          <col style={{ width: 26 }} />
+          <col style={{ width: 64 }} />
         </colgroup>
         <thead>
           <tr>
@@ -812,7 +888,8 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
           </tr>
         </thead>
         <tbody>
-          {filtered.length===0&&<tr><td colSpan={8}><div className="empty-state" style={{padding:"30px 18px"}}><div className="es-ic"><Search size={18}/></div><div className="es-title">No parts match the filter</div><div className="es-hint">Clear the search or pick a different filter.</div></div></td></tr>}
+          {filtered.length===0&&parts.length===0&&<tr><td colSpan={8}><div className="empty-state" style={{padding:"30px 18px"}}><div className="es-ic"><Package size={18}/></div><div className="es-title">No parts yet</div><div className="es-hint">Add a manual part below, or import bodies from the CAD viewer.</div><div style={{marginTop:10}}><button className="btn sm primary" onClick={onAddPart}><Plus size={12}/> Add part</button></div></div></td></tr>}
+          {filtered.length===0&&parts.length>0&&<tr><td colSpan={8}><div className="empty-state" style={{padding:"30px 18px"}}><div className="es-ic"><Search size={18}/></div><div className="es-title">No parts match the filter</div><div className="es-hint">Clear the search or pick a different filter.</div></div></td></tr>}
           {filtered.flatMap(p => {
             const isExpanded = expandedId === p.id;
             const rows = [
@@ -825,6 +902,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, searchQuery
                 onSelect={stableSelect}
                 onUpdate={stableUpdate}
                 onToggleExpanded={toggleExpanded}
+                onDelete={stableDelete}
               />,
             ];
             if (isExpanded) {
@@ -935,59 +1013,6 @@ const DfmPanel = memo(function DfmPanel({ parts, onSelectPart, asmQty, onAcceptI
 });
 
 /* ===========================================================
-   Lead time bar
-   =========================================================== */
-
-function LeadTimeBar({ lead }: { lead:ReturnType<typeof computeLeadTime> }) {
-  const segs=[
-    {k:"Queue",     v:lead.queue,   c:"#b9c1c9"},
-    {k:"Machining", v:lead.machine, c:"#5d80c9"},
-    {k:"Finishing", v:lead.finish,  c:"#c9b48f"},
-    {k:"Ship",      v:lead.ship,    c:"#9fb6a4"},
-  ];
-  return (
-    <div className="leadtime">
-      <div className="lt-head">
-        <div className="ship-by"><Truck size={13}/> Ship by {fmtShipDate(lead.shipDate)}</div>
-        <div className="days">{lead.total} working days</div>
-      </div>
-      <div className="lt-bar">{segs.map(s=><span key={s.k} style={{width:`${(s.v/lead.total)*100}%`,background:s.c}}/>)}</div>
-      <div className="lt-stages">{segs.map(s=><div className="lt-stage" key={s.k}><span className="swatch" style={{background:s.c}}/><span className="label">{s.k}</span><span className="val">{s.v}d</span></div>)}</div>
-    </div>
-  );
-}
-
-/* ===========================================================
-   Quantity breaks
-   =========================================================== */
-
-const QTY_BREAKS=[1,10,25,100,250];
-
-function QuantityBreaks({ parts, asmQty, setAsmQty, commercial }: { parts:Part[]; asmQty:number; setAsmQty:(v:number)=>void; commercial:{marginPct:number;taxPct:number} }) {
-  const breaks=buildQuantityBreaks(parts, commercial, MATERIAL_COSTS, MACHINE_COSTS, QTY_BREAKS);
-  const baseUnit=breaks[0].unit;
-  const currentUnit=asmQty>0?rollup(parts,asmQty,commercial).total/asmQty:0;
-  const bestSavings=currentUnit>0?((baseUnit-currentUnit)/baseUnit)*100:0;
-  return (
-    <div className="qty-breaks">
-      <div className="head"><span className="eyebrow">Quantity breaks</span>{bestSavings>0&&<span className="savings">{fmtPct(-bestSavings)} vs qty 1</span>}</div>
-      <div className="qty-breaks-grid">
-        {breaks.map(b=>{
-          const delta=baseUnit>0?((b.unit-baseUnit)/baseUnit)*100:0;
-          return (
-            <div key={b.q} className={`qty-break ${b.q===asmQty?"active":""}`} onClick={()=>setAsmQty(b.q)}>
-              <div className="qty-val">{b.q}×</div>
-              <div className="qty-unit">{fmtINR0(b.unit)}</div>
-              {b.q>1&&<div className="qty-delta">{fmtPct(delta)}</div>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ===========================================================
    RFQ Rail
    =========================================================== */
 
@@ -1036,20 +1061,28 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
     rfq,
     setRfq,
     quoteEvents,
+    quoteId,
+    quoteNumber,
+    quoteStatus,
     persistenceStatus,
     persistenceError,
     lastSavedAt,
     saveQuote,
+    sendQuote,
     clearPersistenceError,
   } = useQuoteState();
   const navigate = useNavigate();
   const [tab, setTab] = useState<"inputs"|"history"|"notes">("inputs");
   const r=rollup(parts,asmQty,commercial);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
-  const lead=computeLeadTime(parts,asmQty);
   const unit=asmQty>0?r.total/asmQty:0;
   const isSaving = persistenceStatus === "saving";
   const savedText = lastSavedAt ? `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved";
+
+  const includedCount = parts.filter(p => p.included).length;
+  const isSent = quoteStatus !== "draft";
+  const canExport = includedCount > 0;
+  const canSend = Boolean(quoteId) && includedCount > 0 && !isSent && !isSaving;
 
   async function handleSave() {
     try {
@@ -1060,11 +1093,26 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
     }
   }
 
-  async function handleExportPdf() {
+  async function handleSend() {
+    if (!canSend) return;
     try {
-      const pdf = await exportQuotationPdf(exportCalculationFromQuote({ rfq, parts, asmQty, commercial }));
+      const quoteNumber = await sendQuote();
+      window.alert(`Quote sent as ${quoteNumber}.`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to send quote.");
+    }
+  }
+
+  async function handleExportPdf() {
+    if (!canExport) {
+      window.alert("Add at least one included part before exporting a PDF.");
+      return;
+    }
+    try {
+      const data = buildQuotationData({ rfq, parts, asmQty, commercial, quoteNumber });
+      const pdf = await exportQuotationPdf(data);
       if (!pdf.ok) throw new Error(pdf.reason);
-      downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
+      await downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Unable to export PDF.");
     }
@@ -1073,7 +1121,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
   return (
     <div className="panel rfq-panel">
       <div className="panel-head">
-        <span className="title">{rfq.rfqRef || id || "RFQ"}</span>
+        <span className="title">{rfq.rfqRef || quoteNumber || rfq.project || "RFQ"}</span>
         {rfq.customer && <div className="right"><span className="chip"><BoxesIcon size={11}/> {rfq.customer}</span></div>}
       </div>
       <div className="tabstrip">
@@ -1099,8 +1147,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
               <span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{totalQty} parts total</span>
               <input type="number" min="1" aria-label="Assembly quantity" value={asmQty} onChange={e=>setAsmQty(Math.max(1,+e.target.value||1))}/>
             </div>
-            <QuantityBreaks parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial}/>
-            <LeadTimeBar lead={lead}/>
             <div style={{height:10}}/>
 </>
         )}
@@ -1140,12 +1186,31 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial }: {
           <div className="cell right"><div className="label">Per unit</div><div className="value">{fmtINR(unit)}</div><div className="sub">incl. {commercial.marginPct}% margin</div></div>
         </div>
         <div className="total-actions">
-          <button className="btn block primary" onClick={handleExportPdf}><FileDown size={14}/> Export PDF</button>
+          <button
+            className="btn block primary"
+            onClick={handleExportPdf}
+            disabled={!canExport}
+            title={canExport ? "Export quotation PDF" : "Add at least one included part to enable PDF export"}
+          >
+            <FileText size={14}/> Export PDF
+          </button>
           <button className="btn block" onClick={handleSave} disabled={isSaving}>
             {isSaving ? <Clock size={14}/> : persistenceStatus === "saved" ? <Check size={14}/> : <Save size={14}/>}
             {isSaving ? "Saving" : persistenceStatus === "saved" ? "Saved" : "Save"}
           </button>
-          <button className="btn" title="Send"><Send size={14}/></button>
+          <button
+            className="btn"
+            onClick={() => void handleSend()}
+            disabled={!canSend}
+            title={
+              isSent ? `Quote already ${quoteStatus}`
+                : !quoteId ? "Save the quote first"
+                : includedCount === 0 ? "Add at least one included part to send"
+                : "Mark as sent and assign quote number"
+            }
+          >
+            <Send size={14}/>
+          </button>
         </div>
       </div>
     </div>
@@ -1246,33 +1311,23 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial }: {
    Quote workspace
    =========================================================== */
 
-function ConfirmReplaceModal({ existingCount, incomingCount, fileName, onReplace, onCancel }: {
-  existingCount: number; incomingCount: number; fileName: string;
-  onReplace: () => void; onCancel: () => void;
-}) {
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
-        <div className="confirm-icon"><TriangleAlert size={20} /></div>
-        <p className="confirm-msg">
-          Replace {existingCount} configured {existingCount === 1 ? "part" : "parts"} with {incomingCount}{" "}
-          {incomingCount === 1 ? "body" : "bodies"} from <strong>{fileName}</strong>?
-          This will clear materials, stock and operations you've set.
-        </p>
-        <div className="confirm-actions">
-          <button className="btn sm" onClick={onCancel}>Cancel</button>
-          <button className="btn sm danger" onClick={onReplace}>Replace</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
-  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, quoteId, saveQuote } = useQuoteState();
+  const { parts, setParts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, quoteId, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
+  const [reattachPrompt, setReattachPrompt] = useState<{
+    incomingFile: string;
+    existingFile: string;
+  } | null>(null);
+  // Track whether the initial loadQuote pass has finished. Without this gate,
+  // a viewer→quote handoff can fire its merge effect on the very first render
+  // (parts still []) and silently replace the saved row before loadQuote
+  // populates state. See the merge effect below for the full guard.
+  const [wasLoading, setWasLoading] = useState(false);
+  useEffect(() => {
+    if (persistenceStatus === "loading") setWasLoading(true);
+  }, [persistenceStatus]);
+  const loadSettled = wasLoading && persistenceStatus !== "loading";
   const [showAll, setShowAll] = useState(false);
-  const [confirmHandoff, setConfirmHandoff] = useState<{ incomingCount: number; fileName: string } | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem("quote.previewCollapsed") === "1"; } catch { return false; }
   });
@@ -1292,19 +1347,86 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
     };
   }, []);
 
+  // Applies the naming rule from the plan: overwrite project name with the
+  // file's stripped basename only when it's safe (empty or auto-sourced).
+  const getAutoProjectName = useCallback((fileName: string) => {
+    const base = fileName.replace(/\.[^.]+$/, "").trim() || fileName;
+    const projectEmpty = !rfq.project.trim();
+    return projectEmpty || projectNameSource === "auto" ? base : rfq.project;
+  }, [projectNameSource, rfq.project]);
+
+  const applyAutoProjectName = useCallback((fileName: string) => {
+    const nextProject = getAutoProjectName(fileName);
+    if (nextProject !== rfq.project) setProjectAuto(nextProject);
+  }, [getAutoProjectName, rfq.project, setProjectAuto]);
+
+  // Performs the actual merge after we know the user has opted in (or no
+  // pre-existing CAD blocks it). `replaceExisting=true` means the user just
+  // confirmed the re-attach modal — wipe CAD-backed parts first.
+  const completeHandoff = useCallback((replaceExisting: boolean) => {
+    if (!cad) return;
+    const imported = cadResultToParts(consumeHandoff()!);
+    // Drop parts whose meshIds came from the previous CAD when replacing. Keep
+    // manual parts (no meshIds) untouched.
+    const keep = replaceExisting
+      ? parts.filter(p => !p.meshIds || p.meshIds.length === 0)
+      : parts;
+    const existingIds = new Set(keep.map(p => p.id));
+    const additions = imported.filter(p => !existingIds.has(p.id));
+    if (additions.length === 0) return;
+    const merged = [...keep, ...additions];
+    setParts(merged);
+    setSelectedId(additions[0]?.id ?? null);
+    const nextProject = getAutoProjectName(cad.fileName);
+    applyAutoProjectName(cad.fileName);
+    void saveQuote({
+      parts: merged,
+      rfq: { ...rfq, project: nextProject },
+      projectNameSource: nextProject === rfq.project ? projectNameSource : "auto",
+    }).catch(() => {
+      // Persistence errors are rendered by the quote state owner.
+    });
+  }, [applyAutoProjectName, cad, consumeHandoff, getAutoProjectName, parts, projectNameSource, rfq, saveQuote, setParts, setSelectedId]);
+
   useEffect(() => {
     if (!pendingHandoff || !cad) return;
-    if (parts.length === 0) {
-      const imported = cadResultToParts(consumeHandoff()!);
-      setParts(imported);
-      setSelectedId(imported[0]?.id ?? null);
-      void saveQuote({ parts: imported }).catch(() => {
-        // Persistence errors are rendered by the quote state owner.
-      });
-    } else {
-      setConfirmHandoff({ incomingCount: cad.meshes.length, fileName: cad.fileName });
+    // Wait for loadQuote to settle so we merge against the authoritative parts
+    // list instead of the empty initial state. Without this, navigating back
+    // from the viewer remounts QuoteStateProvider, parts is [] for one render,
+    // and the autosave below would replace the saved row with just-CAD parts.
+    if (!loadSettled) return;
+    // Re-attach: the quote already has a different CAD file persisted. Prompt
+    // before discarding the previous file's bodies. Keep the handoff pending
+    // so consumeHandoff() inside completeHandoff still returns the new cad.
+    if (savedCadFileName && savedCadFileName !== cad.fileName) {
+      setReattachPrompt(prev => prev ?? { incomingFile: cad.fileName, existingFile: savedCadFileName });
+      return;
     }
-  }, [pendingHandoff]); // eslint-disable-line react-hooks/exhaustive-deps
+    completeHandoff(false);
+  }, [pendingHandoff, loadSettled, savedCadFileName, cad, completeHandoff]);
+
+  const addManualPart = useCallback(() => {
+    const defaultMaterial = Object.entries(MATERIALS).find(([, m]) => !m.isPurchased)?.[0]
+      ?? Object.keys(MATERIALS)[0]
+      ?? "";
+    const id = `part-${crypto.randomUUID()}`;
+    const nextIndex = parts.length + 1;
+    const newPart: Part = {
+      id,
+      name: `Part ${nextIndex}`,
+      color: colorForMaterial(defaultMaterial || id),
+      material: defaultMaterial,
+      perAssembly: 1,
+      mass: 0,
+      finishing: 0,
+      included: true,
+      stocked: false,
+      stock: null,
+      operations: [],
+    };
+    setParts([...parts, newPart]);
+    setSelectedId(id);
+  }, [parts, setParts, setSelectedId]);
 
   const acceptDfmIssue = useCallback((issue: DfmUiIssue) => {
     setParts(current => current.map(part => {
@@ -1394,37 +1516,47 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
                 selectedId={selectedId}
                 selectedMeshIds={(() => {
                   const p = parts.find(p => p.id === selectedId);
-                  return p?.meshIds ?? (selectedId ? [selectedId] : []);
+                  // Only treat the selection as a CAD selection when the part
+                  // is actually backed by CAD bodies. Manual parts have no
+                  // meshIds, so falling back to [selectedId] (a UUID) would
+                  // put a non-existent id into isolate mode and hide every
+                  // mesh in the scene, leaving the preview blank.
+                  return p?.meshIds && p.meshIds.length > 0 ? p.meshIds : [];
                 })()}
                 showAll={showAll}/>
-            : <QuotePreview parts={parts} selectedId={selectedId} onSelect={setSelectedId}/>)}
+            : <QuotePreview onOpenViewer={onOpenViewer}/>)}
         </div>
         <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial}/>
       </div>
-      <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} searchQuery={searchQuery}/>
+      <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} onAddPart={addManualPart} searchQuery={searchQuery}/>
       <DfmPanel parts={parts} onSelectPart={setSelectedId} asmQty={asmQty} onAcceptIssue={acceptDfmIssue}/>
 
       <CostPanel parts={parts} asmQty={asmQty} commercial={commercial}/>
     </div>
-    {confirmHandoff && cad && (
-      <ConfirmReplaceModal
-        existingCount={parts.length}
-        incomingCount={confirmHandoff.incomingCount}
-        fileName={confirmHandoff.fileName}
-        onReplace={() => {
-          const imported = cadResultToParts(consumeHandoff()!);
-          setParts(imported);
-          setSelectedId(imported[0]?.id ?? null);
-          void saveQuote({ parts: imported }).catch(() => {
-            // Persistence errors are rendered by the quote state owner.
-          });
-          setConfirmHandoff(null);
-        }}
-        onCancel={() => {
-          consumeHandoff();
-          setConfirmHandoff(null);
-        }}
-      />
+    {reattachPrompt && (
+      <div className="modal-overlay" onClick={() => {
+        consumeHandoff();
+        setReattachPrompt(null);
+      }}>
+        <div className="confirm-card" onClick={(e) => e.stopPropagation()}>
+          <div className="confirm-icon"><TriangleAlert size={20}/></div>
+          <p className="confirm-msg">
+            This quote already has a CAD file (<strong>{reattachPrompt.existingFile}</strong>).
+            Replace it with <strong>{reattachPrompt.incomingFile}</strong>?
+            Bodies imported from the previous file will be removed; manual parts will stay.
+          </p>
+          <div className="confirm-actions">
+            <button className="btn sm" onClick={() => {
+              consumeHandoff();
+              setReattachPrompt(null);
+            }}>Cancel</button>
+            <button className="btn sm danger" onClick={() => {
+              setReattachPrompt(null);
+              completeHandoff(true);
+            }}>Replace</button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );
@@ -1443,8 +1575,7 @@ declare global {
 export function QuoteDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { cad } = useCad();
-  const { rfq, quoteId, persistenceStatus, persistenceError, loadQuote, clearPersistenceError } = useQuoteState();
+  const { rfq, quoteId, quoteNumber, quoteStatus, persistenceStatus, persistenceError, loadQuote, clearPersistenceError } = useQuoteState();
   const searchQuery = "";
 
   useEffect(() => {
@@ -1460,6 +1591,11 @@ export function QuoteDetailPage() {
   useEffect(() => {
     if (!id || id === quoteId) return;
     if (quoteId && persistenceStatus === "saved") return;
+    // Don't fire a second load while one is in flight — when this effect
+    // re-runs after setPersistenceStatus("loading") it would otherwise start
+    // a parallel load whose later applySnapshot races with (and reverts) any
+    // state mutations made between the two loads (e.g., a viewer→quote merge).
+    if (persistenceStatus === "loading") return;
     loadQuote(id);
   }, [id, loadQuote, persistenceStatus, quoteId]);
 
@@ -1468,16 +1604,24 @@ export function QuoteDetailPage() {
     navigate(`/quotes/${quoteId}`, { replace: true });
   }, [id, navigate, persistenceStatus, quoteId]);
 
-  const cadName = cad?.fileName?.replace(/\.[^.]+$/, "") ?? "";
-  const title = rfq.project || cadName || "Untitled quote";
+  // rfq.project is authoritative — set by the auto-naming rule on attach,
+  // by the New Quote button as "Untitled quote N", or by the user typing.
+  // The bare "Untitled quote" fallback only fires for legacy rows whose
+  // project was empty (back-filled but never re-saved).
+  const title = rfq.project || "Untitled quote";
+  const statusLabel = quoteStatus === "draft" ? "draft" : quoteStatus;
   const subText = persistenceStatus === "loading"
     ? "Loading saved quote"
     : persistenceStatus === "saving"
       ? "Saving quote"
       : quoteId
-        ? "Saved draft"
+        ? quoteNumber
+          ? `${statusLabel} · ${quoteNumber}`
+          : `Saved ${statusLabel}`
         : `Unsaved draft${searchQuery?` · filter: "${searchQuery}"`:""}`;
-  const quoteRef = rfq.rfqRef || id || "";
+  // Surface only user-meaningful refs (RFQ ref, assigned quote number). The
+  // URL id is an internal UUID and should never reach the user.
+  const quoteRef = rfq.rfqRef || quoteNumber || "";
 
   return (
     <div className="page">
@@ -1501,7 +1645,13 @@ export function QuoteDetailPage() {
           <button type="button" onClick={clearPersistenceError} title="Dismiss error"><X size={14}/></button>
         </div>
       )}
-      <QuoteWorkspace searchQuery={searchQuery} onOpenViewer={() => navigate("/viewer")} />
+      <QuoteWorkspace
+        searchQuery={searchQuery}
+        onOpenViewer={() => {
+          const source = quoteId || id;
+          navigate(source ? `/viewer?from=${encodeURIComponent(source)}` : "/viewer");
+        }}
+      />
     </div>
   );
 }
