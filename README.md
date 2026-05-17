@@ -11,8 +11,8 @@ Built with **Tauri 2**, **React 19**, **Three.js**, and **Drizzle ORM** over **S
 - **STEP / IGES / BREP import** via `occt-import-js` (Open CASCADE compiled to WebAssembly).
 - **3D viewer** — orbit, fit, orientation presets (iso / front / top / right), solid/wireframe, per-face edge extraction, screen-space measure with vertex/edge snap, isolate, and a hybrid principal-axis explode tuned for both plate-stacks and shaft-style assemblies.
 - **Identical-body grouping on import** — duplicate bodies (e.g. nine of the same dowel) collapse into one part row with `perAssembly = N`, so you set material/stock/operations once. Match is layered: tri-count + vertex-count buckets, then a pairwise sorted radial-distance compare with mm-level tolerance that survives OCCT's per-instance tessellation jitter.
-- **Quote workspace** — parts table with per-row material, stock shape (plate / block / round bar / square bar / tube) and dimensions, operations editor (per-machine setup + cycle minutes, rate-card driven), finishing cost, per-row include/exclude.
-- **Live cost rollup** — material + machining + setup + finishing + tooling + inspection + margin + tax, with a quantity-break grid and lead-time bar derived from total machine minutes.
+- **Quote workspace** - parts table with per-row material, stock shape (plate / block / round bar / square bar / tube) and dimensions, operations editor (per-machine setup + cycle minutes, rate-card driven), per-row include/exclude, and brought-out parts (BOPs) for purchased components.
+- **Live cost rollup** - material + setup + machining + BOP subtotal + margin + tax, with a quantity-break grid and lead-time bar derived from total machine minutes. Fixed tooling/inspection overheads and finishing are not currently charged.
 - **DFM panel** — flagged issues with cost impact and suggested fixes; click an issue to jump to the offending part.
 - **Compact in-quote preview** — a slim render-on-demand Three.js viewer pinned top-right. Selecting a part row isolates and frames its bodies; one click toggles back to the full assembly. Idle CPU/GPU is zero so the viewer never throttles the page.
 
@@ -135,7 +135,7 @@ src-tauri/
 1. **Viewer** (`/viewer`) — drop a STEP, inspect bodies, hide/isolate, measure, explode. The imported `CadImportResult` lives in `CadContext`.
 2. Click **Move to Quotation** — that flips `pendingHandoff = true` on `CadContext`.
 3. **Quote page** (`/quotes/:id`) — on mount, if `pendingHandoff` is set, it calls `cadResultToParts(cad)` which runs the identical-body grouping and seeds the parts table with one row per distinct geometry, `perAssembly = copies in the assembly`.
-4. From there, each row gets a material, stock, and operations. Cost rolls up live. Quantity breaks recompute. Lead time updates.
+4. From there, each row gets a material, stock, and operations. Purchased components are added as BOP rows from the catalog. Cost rolls up live. Quantity breaks recompute. Lead time updates.
 
 ### Identical-body grouping (`src/utils/meshFingerprint.ts`)
 
@@ -177,7 +177,7 @@ For deeper project context, see:
 
 ## Status & TODOs
 
-The app is functional end-to-end for the import → group → price → preview loop. Persistence is mid-migration from `localStorage` to Drizzle/SQLite. Some UI affordances are still placeholder — see [`TODO.md`](TODO.md) for the live punch list (Save, Export PDF, Add part, DFM Apply fix, the Viewer's section/explode tools, etc.).
+The app is functional end-to-end for the import -> group -> price -> preview loop. Persistence now writes the quote workflow to Drizzle/SQLite with a browser fallback. Some UI affordances are still placeholder - see [`TODO.md`](TODO.md) for the live punch list (Send/share, DFM actions, rate-card shortcuts, and viewer settings).
 
 ---
 

@@ -22,18 +22,22 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 
 ## Quote Flow
 
-- `src/context/QuoteStateContext.tsx` currently owns parts, selected part, assembly quantity, commercial inputs, and RFQ fields.
+- `src/context/QuoteStateContext.tsx` currently owns parts, BOP rows, selected part, assembly quantity, commercial inputs, and RFQ fields.
 - `src/pages/QuoteDetailPage.tsx` contains the main quote workspace composition and much of the current quote math.
 - `src/components/QuotePreviewViewer.tsx` renders the compact on-demand Three.js preview in the quote page.
-- `src/utils/quoteTypes.ts` defines the current quote workspace `Part`, `Stock`, and `Op` types.
-- `src/utils/quote.ts` and `src/types/` still represent an older quote calculation/export model. Be careful when wiring export or persistence.
+- `src/components/BopModal.tsx` is the shared create/edit modal for catalog BOPs, reused by the BOP catalog page and quote BOP picker.
+- `src/pages/BopsPage.tsx` manages the reusable brought-out-parts catalog.
+- `src/utils/quoteTypes.ts` defines the current quote workspace `Part`, `Bop`, `Stock`, and `Op` types.
+- `src/utils/quoteCosting.ts` owns the active quote rollup used by the quote workspace and persistence. Fixed tooling/inspection charges and finishing cost are currently zeroed/excluded.
+- `src/utils/quote.ts` and `src/types/` still represent an older quote calculation model. Be careful when wiring new export or persistence behavior.
 
 ## Data Layer
 
 - `src/db/client.ts` wraps the Tauri SQL plugin with Drizzle's SQLite proxy.
-- `src/db/schema/` defines normalized tables for RFQs, quotes, parts, geometry, stock, operations, materials, machines, customers, DFM issues, notifications, settings, and recent files.
+- `src/db/schema/` defines normalized tables for RFQs, quotes, parts, geometry, stock, operations, BOP catalog, quote BOP rows, materials, machines, customers, DFM issues, notifications, settings, and recent files.
 - `src/db/queries/` has table-scoped CRUD helpers.
-- `src-tauri/migrations/0001_initial.sql` is the current native SQLite migration.
+- `src/db/quoteWorkflowService.ts` bridges the React quote draft to normalized RFQ/quote/part/BOP tables and computes persisted cost snapshots.
+- `src-tauri/migrations/` contains native SQLite migrations. Keep it in sync with `src/db/schema/`.
 
 ## Design Surface
 

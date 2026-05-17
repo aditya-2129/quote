@@ -7,7 +7,6 @@
 ## Medium Priority
 
 - [ ] **Send button** — open an email/share modal with quote summary.
-- [ ] **Add part button** — append a new blank row to the parts table.
 - [ ] **Per-row More options (⋯) button** — context menu: rename, duplicate, delete part.
 - [ ] **DFM Apply fix buttons** — update issue state when fix is applied.
 - [ ] **DFM Accept buttons** — dismiss/accept a DFM warning.
@@ -39,11 +38,19 @@
 - [x] Parts table — filter chips, bulk apply, include/exclude, material, qty
 - [x] Stock editor — shape picker + dimension inputs
 - [x] Operations editor — add, remove, reorder, edit
-- [x] Finishing / margin / tax inputs
+- [x] Margin / tax inputs
 - [x] Assembly qty input + quantity break buttons
 - [x] Sidebar collapse button
 - [x] Tauri window controls (minimize / maximize / close)
 - [x] Workspace toggle (Viewer / Quote, keyboard V / Q)
+
+### Done since 2026-05-18
+
+- [x] **Brought-out parts catalog** - `/bops` page, catalog CRUD modal, sidebar route, Drizzle schema/query helpers, SQLite migrations, and browser fallback data
+- [x] **Quote BOP rows** - quote-level BOP table with catalog-backed picker, required select-or-create behavior, quantity per assembly, unit cost, subtotal, and PDF export inclusion
+- [x] **Fixed overhead cleanup** - removed fixed tooling and inspection charges from quote defaults, rollup, and cost breakdown UI
+- [x] **Finishing cost cleanup** - removed finishing from active quote rollup, PDF allocation, and visible cost breakdown because no current UI edits it
+- [x] **Add part button** - appends a blank manual row to the parts table
 
 ### Done since 2026-05-17
 

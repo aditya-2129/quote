@@ -57,7 +57,6 @@ import {
   operationCost as calculateOperationCost,
   operationMinutes as calculateOperationMinutes,
   operationRate as calculateOperationRate,
-  partFinishingCost as calculatePartFinishingCost,
   partMachineCost as calculatePartMachineCost,
   partMaterialCost as calculatePartMaterialCost,
   partNetMassKg as calculatePartNetMassKg,
@@ -190,7 +189,6 @@ function partMachineCost(p: Part, asmQty: number): number {
 function partMaterialCost(p: Part, asmQty: number): number {
   return calculatePartMaterialCost(p, asmQty, MATERIAL_COSTS);
 }
-function partFinishCost(p: Part, asmQty: number): number { return calculatePartFinishingCost(p, asmQty); }
 function partSubtotal(p: Part, asmQty: number): number {
   return calculatePartSubtotal(p, asmQty, MATERIAL_COSTS, MACHINE_COSTS);
 }
@@ -319,7 +317,6 @@ function partDescription(part: Part): string {
   const bits: string[] = [];
   if (material?.label) bits.push(material.label);
   if (part.stock) bits.push(fmtStockDims(part.stock));
-  if (part.finishing > 0) bits.push(`Finishing ₹${part.finishing}/unit`);
   if (part.operations.length > 0) {
     const ops = part.operations
       .map(op => MACHINES[op.machine]?.short || MACHINES[op.machine]?.label || op.machine)
@@ -358,8 +355,7 @@ function buildQuotationData(args: {
     part,
     raw:
       partMaterialCost(part, args.asmQty) +
-      partMachineCost(part, args.asmQty) +
-      partFinishCost(part, args.asmQty),
+      partMachineCost(part, args.asmQty),
   }));
   const rawSum = partRaw.reduce((s, p) => s + p.raw, 0);
 
@@ -1461,7 +1457,6 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
     if (!p.included) return;
     const qty = partQty(p, asmQty);
     cat.material += partMaterialCost(p, asmQty);
-    cat.finish += partFinishCost(p, asmQty);
     (p.operations || []).forEach(op => {
       const rate = opRate(op);
       cat.setup += (op.setupMin / 60) * rate;
@@ -1488,7 +1483,6 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
     { k: "Material",   v: cat.material, c: "#5d80c9" },
     { k: "Machining",  v: cat.machine,  c: "#7b95c0" },
     { k: "Setup",      v: cat.setup,    c: "#9aabc7" },
-    { k: "Finishing",  v: cat.finish,   c: "#c9b48f" },
     { k: "Margin",     v: r.margin,     c: "#5fa05f" },
   ];
   const segsTotal = segs.reduce((a, s) => a + s.v, 0) || 1;
@@ -2144,6 +2138,8 @@ export function QuoteDetailPage() {
     </div>
   );
 }
+
+
 
 
 

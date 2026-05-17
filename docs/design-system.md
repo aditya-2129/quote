@@ -45,7 +45,9 @@ This is a shop-floor-adjacent quoting workstation: precise, calm, compact, and f
 - Keep user-facing language on quote rows as "part" rather than "mesh".
 - Keep selected part state synchronized between table and preview.
 - Preserve `perAssembly` behavior when duplicate bodies are grouped.
-- Keep cost and lead-time calculations live and visibly tied to editable inputs.
+- Keep cost and lead-time calculations live and visibly tied to editable inputs. Do not show cost categories that users cannot affect from the current workflow.
+- Treat brought-out parts as a compact operational table: catalog-backed selection is required, arbitrary typed names should not silently commit, and creating a new BOP should use the shared catalog modal.
+- Keep quote BOP rows focused on name, quantity per assembly, unit cost, and total cost. Supplier belongs in the catalog metadata and picker details; part numbers are no longer part of the BOP model.
 - DFM actions should make risk state explicit: unresolved, accepted, or fixed.
 
 ## CSS Source Of Truth
