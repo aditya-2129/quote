@@ -35,8 +35,8 @@ export type QuoteRollup = {
   currency: string;
 };
 
-export const DEFAULT_TOOLING_BATCH = 244;
-export const DEFAULT_INSPECTION_BATCH = 326;
+export const DEFAULT_TOOLING_BATCH = 0;
+export const DEFAULT_INSPECTION_BATCH = 0;
 export const DEFAULT_QUANTITY_BREAKS = [1, 10, 25, 100, 250] as const;
 
 function finite(value: number | null | undefined): number {
@@ -246,3 +246,5 @@ export function toQuoteCostSnapshot(rollup: QuoteRollup): QuoteCostSnapshot {
     computedAt: new Date().toISOString(),
   };
 }
+
+

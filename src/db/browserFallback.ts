@@ -112,12 +112,12 @@ const initialDb: BrowserDb = {
       assemblyQuantity: 25,
       quantityBreaks: [1, 10, 25, 100, 250],
       currency: "INR",
-      toolingCost: 244,
-      inspectionCost: 326,
+      toolingCost: 0,
+      inspectionCost: 0,
       marginPercent: 18,
       taxPercent: 0,
       discountPercent: 0,
-      costSnapshot: { partsCost: 43484.52, tooling: 244, inspection: 326, subtotal: 44054.52, margin: 7929.81, tax: 0, total: 51984.33, unitPrice: 2079.37, currency: "INR", computedAt: seedDate.toISOString() },
+      costSnapshot: { partsCost: 43484.52, tooling: 0, inspection: 0, subtotal: 44054.52, margin: 7929.81, tax: 0, total: 51984.33, unitPrice: 2079.37, currency: "INR", computedAt: seedDate.toISOString() },
       notes: "Dev browser seed quote.",
       validUntil: new Date("2026-06-16T00:00:00.000Z"),
       createdAt: seedDate,
@@ -678,3 +678,5 @@ export const browserDb = {
     writeDb(db);
   },
 };
+
+

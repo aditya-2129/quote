@@ -22,7 +22,6 @@ import type { CadImportResult } from "@utils/index";
 import {
   Box,
   Boxes,
-  BoxesIcon,
   Check,
   ChevronDown,
   ChevronRight,
@@ -155,8 +154,6 @@ function normalizeStock(stock: Stock | null): Stock | null {
 let __opSeq = 100;
 const opId = () => `op-${++__opSeq}`;
 
-const TOOLING_BATCH = 244;
-const INSPECTION_BATCH = 326;
 
 /* ===========================================================
    Costing utilities
@@ -208,8 +205,7 @@ function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; t
   });
   if (probe.partsCost <= 0 && probe.bopCost <= 0) return probe;
   return calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
-    toolingCost: TOOLING_BATCH,
-    inspectionCost: INSPECTION_BATCH,
+    toolingCost: 0, inspectionCost: 0,
     bops,
   });
 }
@@ -1366,7 +1362,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
       <div className="panel-head">
         <span className="title">{rfq.rfqRef || quoteNumber || rfq.project || "RFQ"}</span>
         <div className="right">
-          {rfq.customer && <span className="chip"><BoxesIcon size={11}/> {rfq.customer}</span>}
           <span className={`chip ${persistenceStatus === "error" ? "" : "success"}`}>
             <span className="dot"/>
             {isSaving ? "Saving..." : persistenceStatus === "saved" ? savedText : "Draft"}
@@ -1494,8 +1489,6 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
     { k: "Machining",  v: cat.machine,  c: "#7b95c0" },
     { k: "Setup",      v: cat.setup,    c: "#9aabc7" },
     { k: "Finishing",  v: cat.finish,   c: "#c9b48f" },
-    { k: "Tooling",    v: r.tooling,    c: "#c7c2b4" },
-    { k: "Inspection", v: r.inspection, c: "#9fb6a4" },
     { k: "Margin",     v: r.margin,     c: "#5fa05f" },
   ];
   const segsTotal = segs.reduce((a, s) => a + s.v, 0) || 1;
@@ -1515,12 +1508,8 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
       <div className="cost-grid">
         <div className="cost-row left"><span className="k">Parts subtotal</span><span className="v">{fmtINR(r.partsCost)}</span></div>
         <div className="cost-row right"><span className="k">BOP subtotal</span><span className="v">{fmtINR(r.bopCost)}</span></div>
-        <div className="cost-row left"><span className="k">Tooling · amortized</span><span className="v">{fmtINR(r.tooling)}</span></div>
-        <div className="cost-row right"><span className="k">Inspection · batch</span><span className="v">{fmtINR(r.inspection)}</span></div>
         <div className="cost-row left"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
         <div className="cost-row right"><span className="k">Tax</span><span className="v">{fmtINR(r.tax)}</span></div>
-        <div className="cost-row left total"><span className="k">Subtotal</span><span className="v">{fmtINR(r.subtotal)}</span></div>
-        <div className="cost-row right total"><span className="k">Quotation total</span><span className="v">{fmtINR(r.total)}</span></div>
       </div>
       {machineRows.length > 0 && (
         <>
@@ -2155,4 +2144,11 @@ export function QuoteDetailPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
 

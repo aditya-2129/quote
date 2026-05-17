@@ -773,8 +773,8 @@ export async function createBlankQuoteWorkflow(options: {
     parts: [],
     asmQty: options.asmQty ?? 25,
     commercial: options.commercial ?? { marginPct: 18, taxPct: 0 },
-    toolingCost: 244,
-    inspectionCost: 326,
+    toolingCost: 0,
+    inspectionCost: 0,
     projectNameSource: "auto",
   });
   return result.quote.id;
@@ -821,3 +821,5 @@ export async function sendQuoteWorkflow(quoteId: string): Promise<SendQuoteResul
 
   return { quote: updated, quoteNumber };
 }
+
+

@@ -184,8 +184,8 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
-      toolingCost: 244,
-      inspectionCost: 326,
+      toolingCost: 0,
+      inspectionCost: 0,
       projectNameSource,
     };
   }, [asmQty, bops, commercial, parts, projectNameSource, quoteId, rfq, rfqId]);
@@ -309,8 +309,8 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
-      toolingCost: 244,
-      inspectionCost: 326,
+      toolingCost: 0,
+      inspectionCost: 0,
       cadSource,
       projectNameSource,
       ...overrides,
@@ -347,8 +347,8 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
-      toolingCost: 244,
-      inspectionCost: 326,
+      toolingCost: 0,
+      inspectionCost: 0,
       projectNameSource,
     };
     if (!hasDraftContent(draft)) return;
@@ -388,3 +388,5 @@ export function useQuoteState(): QuoteStateCtx {
   if (!ctx) throw new Error("useQuoteState must be used within QuoteStateProvider");
   return ctx;
 }
+
+
