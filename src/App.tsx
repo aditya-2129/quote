@@ -1,5 +1,6 @@
 import { HashRouter, Routes, Route, Navigate, Outlet, useParams } from "react-router-dom";
 import { Layout } from "@components/Layout";
+import { AppUpdaterPrompt } from "@components/AppUpdaterPrompt";
 import { CadProvider } from "@context/CadContext";
 import { QuoteStateProvider } from "@context/QuoteStateContext";
 import {
@@ -25,6 +26,7 @@ function QuoteLayout() {
 function App() {
   return (
     <HashRouter>
+      <AppUpdaterPrompt />
       <Routes>
         <Route element={<CadProvider><Layout /></CadProvider>}>
           <Route index element={<Navigate to="/quotes" replace />} />

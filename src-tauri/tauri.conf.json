@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Quote",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.quote.app",
   "build": {
     "frontendDist": "../dist",
@@ -30,6 +30,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -38,5 +39,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCNTJGMjc4OUZDQTgzQzAKUldUQWc4cWZlUEpTU3c2enZFeG9KckNrdDNwMzQ2WmxKQWloaWNnZVR5MWc0Wmt6RUVqY0oxVXAK",
+      "endpoints": [
+        "https://github.com/aditya-2129/quote/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

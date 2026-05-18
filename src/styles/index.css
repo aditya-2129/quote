@@ -2023,6 +2023,67 @@ a { text-decoration: none; color: inherit; }
   margin-top: 4px;
 }
 
+.app-update-card {
+  width: min(430px, calc(100vw - 32px));
+  align-items: stretch;
+  text-align: left;
+}
+
+.app-update-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.app-update-head h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+.app-update-head p,
+.app-update-notes {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.app-update-notes {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.modal-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-3);
+}
+
+.modal-close:hover {
+  background: var(--panel-3);
+  color: var(--text-1);
+}
+
+.app-update-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
 /* Error banner inside modal */
 .error-banner {
   display: flex;
