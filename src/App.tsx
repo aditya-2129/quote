@@ -4,7 +4,6 @@ import { CadProvider } from "@context/CadContext";
 import { QuoteStateProvider } from "@context/QuoteStateContext";
 import {
   ViewerPage,
-  RfqsPage,
   QuotesPage,
   QuoteDetailPage,
   CustomersPage,
@@ -30,7 +29,6 @@ function App() {
         <Route element={<CadProvider><Layout /></CadProvider>}>
           <Route index element={<Navigate to="/quotes" replace />} />
           <Route path="/viewer" element={<ViewerPage />} />
-          <Route path="/rfqs" element={<RfqsPage />} />
           <Route path="/quotes" element={<QuotesPage />} />
           <Route path="/quotes/:id" element={<QuoteLayout />}>
             <Route index element={<QuoteDetailPage />} />

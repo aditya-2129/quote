@@ -1,16 +1,15 @@
 import { useState, useEffect } from "react";
-import { Inbox, FileText, Users, CheckCircle2 } from "lucide-react";
-import { getAllRfqs, getRootQuotes, getAllCustomers } from "../db/queries";
+import { FileText, Users, CheckCircle2 } from "lucide-react";
+import { getRootQuotes, getAllCustomers } from "../db/queries";
 import { StatCard } from "../components/StatCard";
 
 export function AnalyticsPage() {
-  const [counts, setCounts] = useState({ rfqs: 0, drafts: 0, won: 0, customers: 0 });
+  const [counts, setCounts] = useState({ drafts: 0, won: 0, customers: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getAllRfqs(), getRootQuotes(), getAllCustomers()]).then(([rfqs, quotes, customers]) => {
+    Promise.all([getRootQuotes(), getAllCustomers()]).then(([quotes, customers]) => {
       setCounts({
-        rfqs: rfqs.filter(r => r.status === "new" || r.status === "reviewing").length,
         drafts: quotes.filter(q => q.status === "draft").length,
         won: quotes.filter(q => q.status === "won").length,
         customers: customers.length
@@ -29,13 +28,7 @@ export function AnalyticsPage() {
           <div className="empty" style={{ padding: "40px 20px", textAlign: "center" }}>Loading metrics...</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
-            <StatCard 
-              title="Open Inquiries"
-              value={counts.rfqs.toString()} 
-              icon={<Inbox size={20} />} 
-              change="Needs review"
-            />
-            <StatCard 
+            <StatCard
               title="Quotes in Draft" 
               value={counts.drafts.toString()} 
               icon={<FileText size={20} />} 

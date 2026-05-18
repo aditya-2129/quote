@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import type { Bop, Part } from "@utils/quoteTypes";
+import type { Bop, ExtraCost, ExtraCostCode } from "@utils/quoteTypes";
+import type { Part } from "@utils/quoteTypes";
+import { QUOTE_EXTRA_COST_ROSTER } from "../db/schema";
 import { useCad } from "./CadContext";
 import {
   loadQuoteWorkflow,
@@ -8,6 +10,7 @@ import {
   type LoadedQuoteWorkflow,
   type QuoteWorkflowDraft,
 } from "../db/quoteWorkflowService";
+import { updateQuoteStatus } from "../db/queries";
 import type { ProjectNameSource } from "../db/schema";
 
 export type Rfq = { customer: string; customerId: string | null; project: string; rfqRef: string; notes: string };
@@ -15,12 +18,20 @@ export type PersistenceStatus = "idle" | "loading" | "saving" | "saved" | "error
 
 const defaultCommercial = { marginPct: 18, taxPct: 0 };
 const defaultRfq: Rfq = { customer: "", customerId: null, project: "", rfqRef: "", notes: "" };
+const defaultExtraCosts: ExtraCost[] = QUOTE_EXTRA_COST_ROSTER.map(entry => ({
+  code: entry.code as ExtraCostCode,
+  label: entry.label,
+  amount: 0,
+  sortOrder: entry.sortOrder,
+}));
 
 interface QuoteStateCtx {
   parts: Part[];
   setParts: Dispatch<SetStateAction<Part[]>>;
   bops: Bop[];
   setBops: Dispatch<SetStateAction<Bop[]>>;
+  extraCosts: ExtraCost[];
+  setExtraCosts: Dispatch<SetStateAction<ExtraCost[]>>;
   selectedId: string | null;
   setSelectedId: Dispatch<SetStateAction<string | null>>;
   asmQty: number;
@@ -46,6 +57,7 @@ interface QuoteStateCtx {
   loadQuote: (id: string) => Promise<boolean>;
   saveQuote: (overrides?: Partial<QuoteWorkflowDraft>) => Promise<string>;
   sendQuote: () => Promise<string>;
+  changeStatus: (status: QuoteStateCtx["quoteStatus"]) => Promise<void>;
   clearPersistenceError: () => void;
 }
 
@@ -68,6 +80,10 @@ function draftSignature(draft: QuoteWorkflowDraft): string {
       taxPct: draft.commercial.taxPct,
       discountPct: draft.commercial.discountPct ?? 0,
     },
+    extraCosts: (draft.extraCosts ?? []).map(row => ({
+      code: row.code,
+      amount: row.amount,
+    })),
     bops: (draft.bops ?? []).map(bop => ({
       id: bop.id,
       catalogId: bop.catalogId ?? null,
@@ -140,6 +156,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   pendingHandoffRef.current = cadCtx.pendingHandoff;
   const [parts, setParts] = useState<Part[]>([]);
   const [bops, setBops] = useState<Bop[]>([]);
+  const [extraCosts, setExtraCosts] = useState<ExtraCost[]>(defaultExtraCosts);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [asmQty, setAsmQty] = useState(25);
   const [commercial, setCommercial] = useState(defaultCommercial);
@@ -184,11 +201,12 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
+      extraCosts,
       toolingCost: 0,
       inspectionCost: 0,
       projectNameSource,
     };
-  }, [asmQty, bops, commercial, parts, projectNameSource, quoteId, rfq, rfqId]);
+  }, [asmQty, bops, commercial, extraCosts, parts, projectNameSource, quoteId, rfq, rfqId]);
 
   const applySnapshot = useCallback((snapshot: LoadedQuoteWorkflow) => {
     setQuoteId(snapshot.quoteId);
@@ -214,6 +232,14 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     });
     setParts(snapshot.parts);
     setBops(snapshot.bops ?? []);
+    // Always merge over the default roster so any missing codes still show with 0.
+    {
+      const incoming = new Map((snapshot.extraCosts ?? []).map(row => [row.code, row]));
+      setExtraCosts(defaultExtraCosts.map(entry => {
+        const match = incoming.get(entry.code);
+        return match ? { ...entry, label: match.label, amount: match.amount } : entry;
+      }));
+    }
     setSelectedId(snapshot.parts[0]?.id ?? null);
     setLastSavedAt(snapshot.records.quote.updatedAt ?? null);
     lastSavedSignatureRef.current = draftSignature(snapshot);
@@ -309,6 +335,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
+      extraCosts,
       toolingCost: 0,
       inspectionCost: 0,
       cadSource,
@@ -336,7 +363,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
     })();
     saveInFlightRef.current = promise;
     return promise;
-  }, [applySavedIdentity, applySnapshot, asmQty, bops, commercial, getCadBytes, parts, projectNameSource, quoteId, rfq, rfqId]);
+  }, [applySavedIdentity, applySnapshot, asmQty, bops, commercial, extraCosts, getCadBytes, parts, projectNameSource, quoteId, rfq, rfqId]);
 
   useEffect(() => {
     const draft: QuoteWorkflowDraft = {
@@ -347,6 +374,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       commercial,
       parts,
       bops,
+      extraCosts,
       toolingCost: 0,
       inspectionCost: 0,
       projectNameSource,
@@ -362,7 +390,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       });
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [asmQty, bops, commercial, parts, persistenceStatus, projectNameSource, quoteId, rfq, rfqId, saveQuote]);
+  }, [asmQty, bops, commercial, extraCosts, parts, persistenceStatus, projectNameSource, quoteId, rfq, rfqId, saveQuote]);
 
   const sendQuote = useCallback(async () => {
     // Flush pending edits first so the sent quote reflects what the user sees.
@@ -376,8 +404,14 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
 
   const clearPersistenceError = useCallback(() => setPersistenceError(null), []);
 
+  const changeStatus = useCallback(async (status: QuoteStateCtx["quoteStatus"]) => {
+    if (!quoteId) return;
+    await updateQuoteStatus(quoteId, status);
+    setQuoteStatus(status);
+  }, [quoteId]);
+
   return (
-    <QuoteStateContext.Provider value={{ parts, setParts, bops, setBops, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, clearPersistenceError }}>
+    <QuoteStateContext.Provider value={{ parts, setParts, bops, setBops, extraCosts, setExtraCosts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, rfq, setRfq, projectNameSource, setProjectAuto, savedCadFileName, quoteId, quoteNumber, quoteStatus, rfqId, persistenceStatus, persistenceError, lastSavedAt, loadQuote, saveQuote, sendQuote, changeStatus, clearPersistenceError }}>
       {children}
     </QuoteStateContext.Provider>
   );

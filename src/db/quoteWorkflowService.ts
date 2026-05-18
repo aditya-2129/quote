@@ -12,6 +12,7 @@ import {
   deletePart,
   deletePartGeometry,
   deletePartStock,
+  ensureQuoteExtraCostRoster,
   getAllMachines,
   getAllMaterials,
   getAllQuotes,
@@ -23,6 +24,7 @@ import {
   getQuoteById,
   getQuoteBopsByQuote,
   getQuoteCadSource,
+  getQuoteExtraCostsByQuote,
   getRootQuotes,
   getRfqById,
   updateOperation,
@@ -33,7 +35,9 @@ import {
   upsertPartGeometry,
   upsertPartStock,
   upsertQuoteCadSource,
+  upsertQuoteExtraCost,
 } from "./queries";
+import { QUOTE_EXTRA_COST_ROSTER } from "./schema";
 import type {
   PartGeometry,
   ProjectNameSource,
@@ -42,7 +46,7 @@ import type {
   Rfq,
   UnitSystem,
 } from "./schema";
-import type { Bop, Op, Part, Stock } from "../utils/quoteTypes";
+import type { Bop, ExtraCost, Op, Part, Stock } from "../utils/quoteTypes";
 import {
   buildMachineCatalog,
   buildMaterialCatalog,
@@ -92,6 +96,7 @@ export type QuoteWorkflowDraft = {
   rfq: QuoteWorkflowRfqDraft;
   parts: QuoteWorkflowPartDraft[];
   bops?: Bop[];
+  extraCosts?: ExtraCost[];
   asmQty: number;
   commercial: QuoteWorkflowCommercialDraft;
   currency?: string;
@@ -110,6 +115,7 @@ export type LoadedQuoteWorkflow = QuoteWorkflowDraft & {
   quoteId: string;
   rfqId: string | null;
   bops: Bop[];
+  extraCosts: ExtraCost[];
   records: {
     rfq: Rfq | null;
     quote: Quote;
@@ -133,11 +139,13 @@ export type DuplicateDraftCleanupResult = {
 
 type PartNotesMeta = {
   materialRateOverride?: number | null;
+  materialLabelSnapshot?: string | null;
   meshIds?: string[];
 };
 
 type OperationNotesMeta = {
   rateOverride?: number | null;
+  machineLabelSnapshot?: string | null;
 };
 
 type RfqNotesMeta = {
@@ -200,18 +208,23 @@ function decodeMeta<T>(notes: string | null | undefined): T | null {
   }
 }
 
-function partNotes(part: QuoteWorkflowPartDraft): string | null {
+function partNotes(part: QuoteWorkflowPartDraft, materialLabelById: Map<string, string>): string | null {
   const meta: PartNotesMeta = {};
   if (part.materialRateOverride !== undefined) {
     meta.materialRateOverride = part.materialRateOverride;
   }
+  const label = part.materialLabelSnapshot?.trim() || materialLabelById.get(part.material);
+  if (label) meta.materialLabelSnapshot = label;
   if (part.meshIds !== undefined) meta.meshIds = part.meshIds;
   return Object.keys(meta).length > 0 ? encodeMeta(meta) : null;
 }
 
-function operationNotes(op: Op): string | null {
-  if (op.rateOverride === undefined) return null;
-  return encodeMeta<OperationNotesMeta>({ rateOverride: op.rateOverride });
+function operationNotes(op: Op, machineLabelById: Map<string, string>): string | null {
+  const meta: OperationNotesMeta = {};
+  if (op.rateOverride !== undefined) meta.rateOverride = op.rateOverride;
+  const label = op.machineLabelSnapshot?.trim() || machineLabelById.get(op.machine);
+  if (label) meta.machineLabelSnapshot = label;
+  return Object.keys(meta).length > 0 ? encodeMeta(meta) : null;
 }
 
 function rfqNotes(rfq: QuoteWorkflowRfqDraft): string | null {
@@ -246,6 +259,7 @@ function toPartDraft(part: import("./schema").Part): QuoteWorkflowPartDraft {
     included: part.isIncluded,
     stocked: part.isStocked,
     materialRateOverride: meta?.materialRateOverride,
+    materialLabelSnapshot: meta?.materialLabelSnapshot,
     meshIds: meta?.meshIds,
     stock: null,
     operations: [],
@@ -283,6 +297,7 @@ function operationToDraft(operation: import("./schema").PartOperation): Op {
     machine: operation.machineId ?? "",
     setupMin: operation.setupMin,
     cycleMin: operation.cycleMin,
+    machineLabelSnapshot: meta?.machineLabelSnapshot,
     rateOverride: meta?.rateOverride,
   };
 }
@@ -293,7 +308,9 @@ async function savePartChildren(
   sortOrder: number,
   fallbackFileName: string,
   validMachineIds: Set<string>,
+  machineLabelById: Map<string, string>,
   validMaterialIds: Set<string>,
+  materialLabelById: Map<string, string>,
 ): Promise<void> {
   const existingParts = await getPartsByQuote(quoteId);
   const existing = existingParts.find((row) => row.id === part.id);
@@ -308,7 +325,7 @@ async function savePartChildren(
     finishingCost: finiteNumber(part.finishing),
     isIncluded: part.included,
     isStocked: part.stocked ?? false,
-    notes: partNotes(part),
+    notes: partNotes(part, materialLabelById),
     sortOrder,
   };
 
@@ -360,7 +377,7 @@ async function savePartChildren(
       machineId: operation.machine && validMachineIds.has(operation.machine) ? operation.machine : null,
       setupMin: finiteNumber(operation.setupMin),
       cycleMin: finiteNumber(operation.cycleMin),
-      notes: operationNotes(operation),
+      notes: operationNotes(operation, machineLabelById),
       sortOrder: i,
     };
     if (existingOperations.some((row) => row.id === operation.id)) {
@@ -410,15 +427,20 @@ export async function saveQuoteWorkflow(
   // Only apply per-batch tooling/inspection when included parts have non-zero
   // configured cost (material + ops). Blank drafts and just-added empty parts
   // should report ₹0 instead of the ₹570 default overhead baseline.
+  const rollupBops = draft.bops?.map((b) => ({ qtyPerAssembly: b.qtyPerAssembly, unitCost: b.unitCost }));
+  const rollupExtras = draft.extraCosts?.map((e) => ({ amount: e.amount }));
   const probe = calculateQuoteRollup(draft.parts, asm, terms, matCat, macCat, {
     toolingCost: 0, inspectionCost: 0, currency: draft.currency ?? "INR",
+    bops: rollupBops, extraCosts: rollupExtras,
   });
   const costSnapshot = draft.costSnapshot ?? toQuoteCostSnapshot(
-    probe.partsCost > 0
+    probe.partsCost > 0 || probe.bopCost > 0 || probe.extraCost > 0
       ? calculateQuoteRollup(draft.parts, asm, terms, matCat, macCat, {
           toolingCost: finiteNumber(draft.toolingCost),
           inspectionCost: finiteNumber(draft.inspectionCost),
           currency: draft.currency ?? "INR",
+          bops: rollupBops,
+          extraCosts: rollupExtras,
         })
       : probe,
   );
@@ -499,11 +521,13 @@ export async function saveQuoteWorkflow(
 
   const fallbackFileName = draft.fileName ?? `${title}.step`;
   const validMachineIds = new Set(machines.map((m) => m.id));
+  const machineLabelById = new Map(machines.map((m) => [m.id, m.name]));
   const validMaterialIds = new Set(materials.map((m) => m.id));
+  const materialLabelById = new Map(materials.map((m) => [m.id, m.name]));
   for (let i = 0; i < normalized.parts.length; i++) {
     const part = normalized.parts[i]!;
     try {
-      await savePartChildren(part, quote.id, i, fallbackFileName, validMachineIds, validMaterialIds);
+      await savePartChildren(part, quote.id, i, fallbackFileName, validMachineIds, machineLabelById, validMaterialIds, materialLabelById);
     } catch (error) {
       throw new Error(
         `Failed to save part "${part.name}" (${part.id}): ${error instanceof Error ? error.message : String(error)}`,
@@ -537,6 +561,23 @@ export async function saveQuoteWorkflow(
       } else {
         await createQuoteBop(payload);
       }
+    }
+  }
+
+  // Always ensure the fixed roster exists, then persist any amount overrides.
+  await ensureQuoteExtraCostRoster(quote.id);
+  if (draft.extraCosts !== undefined) {
+    const allowed = new Map(QUOTE_EXTRA_COST_ROSTER.map((r) => [r.code, r]));
+    for (const row of draft.extraCosts) {
+      const roster = allowed.get(row.code);
+      if (!roster) continue;
+      await upsertQuoteExtraCost({
+        quoteId: quote.id,
+        code: roster.code,
+        label: roster.label,
+        amount: Math.max(0, finiteNumber(row.amount)),
+        sortOrder: roster.sortOrder,
+      });
     }
   }
 
@@ -588,6 +629,19 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     notes: row.notes ?? undefined,
   }));
 
+  await ensureQuoteExtraCostRoster(quote.id);
+  const extraCostRows = await getQuoteExtraCostsByQuote(quote.id);
+  const rosterByCode = new Map(QUOTE_EXTRA_COST_ROSTER.map((r) => [r.code, r]));
+  const extraCosts: ExtraCost[] = QUOTE_EXTRA_COST_ROSTER.map((entry) => {
+    const row = extraCostRows.find((r) => r.code === entry.code);
+    return {
+      code: entry.code,
+      label: rosterByCode.get(entry.code)?.label ?? entry.label,
+      amount: row?.amount ?? 0,
+      sortOrder: entry.sortOrder,
+    };
+  });
+
   const cadSourceRow = await getQuoteCadSource(quote.id);
   const cadSource: QuoteWorkflowCadSource | null = cadSourceRow
     ? { bytes: base64ToBytes(cadSourceRow.fileBytesBase64), fileName: cadSourceRow.fileName }
@@ -605,6 +659,7 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     },
     parts,
     bops,
+    extraCosts,
     asmQty: quote.assemblyQuantity,
     commercial: {
       marginPct: quote.marginPercent,
@@ -821,5 +876,3 @@ export async function sendQuoteWorkflow(quoteId: string): Promise<SendQuoteResul
 
   return { quote: updated, quoteNumber };
 }
-
-

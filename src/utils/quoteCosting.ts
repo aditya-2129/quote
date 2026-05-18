@@ -27,6 +27,8 @@ export type QuoteRollup = {
   inspection: number;
   partsCost: number;
   bopCost: number;
+  /** Sum of fixed extra-cost line items (added after tax, no margin/tax markup). */
+  extraCost: number;
   subtotal: number;
   margin: number;
   tax: number;
@@ -177,6 +179,7 @@ export function calculateQuoteRollup(
     inspectionCost?: number;
     currency?: string;
     bops?: Array<{ qtyPerAssembly: number; unitCost: number }>;
+    extraCosts?: Array<{ amount: number }>;
   } = {},
 ): QuoteRollup {
   const included = parts.filter(part => part.included);
@@ -189,13 +192,17 @@ export function calculateQuoteRollup(
     const cost = Math.max(0, finite(bop.unitCost));
     return sum + cost * qty * Math.max(0, assemblyQuantity);
   }, 0);
+  const extraCost = (options.extraCosts ?? []).reduce(
+    (sum, row) => sum + Math.max(0, finite(row.amount)),
+    0,
+  );
   const tooling = options.toolingCost ?? DEFAULT_TOOLING_BATCH;
   const inspection = options.inspectionCost ?? DEFAULT_INSPECTION_BATCH;
   const partsCost = materialCost + setupCost + machineCost;
   const subtotal = partsCost + bopCost + tooling + inspection;
   const margin = subtotal * (finite(commercial.marginPct) / 100);
   const tax = (subtotal + margin) * (finite(commercial.taxPct) / 100);
-  const total = subtotal + margin + tax;
+  const total = subtotal + margin + tax + extraCost;
   const unitPrice = assemblyQuantity > 0 ? total / assemblyQuantity : 0;
   const firstMaterial = included.map(part => materials[part.material]).find(Boolean);
   const currency = options.currency ?? firstMaterial?.currency ?? "INR";
@@ -209,6 +216,7 @@ export function calculateQuoteRollup(
     inspection,
     partsCost,
     bopCost,
+    extraCost,
     subtotal,
     margin,
     tax,
@@ -239,6 +247,7 @@ export function toQuoteCostSnapshot(rollup: QuoteRollup): QuoteCostSnapshot {
     subtotal: roundMoney(rollup.subtotal),
     margin: roundMoney(rollup.margin),
     tax: roundMoney(rollup.tax),
+    extraCost: roundMoney(rollup.extraCost),
     total: roundMoney(rollup.total),
     unitPrice: roundMoney(rollup.unitPrice),
     currency: rollup.currency,

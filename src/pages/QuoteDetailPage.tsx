@@ -8,14 +8,16 @@ import {
   useRef,
   type Dispatch,
   type FormEvent,
+  type MutableRefObject,
   type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
 import { useCad } from "@context/CadContext";
 import { useQuoteState } from "@context/QuoteStateContext";
 import { cadResultToParts } from "@utils/cadHandoff";
-import type { Bop, Part, Op, Stock } from "@utils/quoteTypes";
+import type { Bop, ExtraCost, Part, Op, Stock } from "@utils/quoteTypes";
 import { exportQuotationPdf, type QuotationData, type QuotationLineItem } from "@utils/export";
+import pacificIndiaLogoUrl from "../assets/pacific-india-logo.jpg";
 import { BopModal, type BopModalData } from "@components/BopModal";
 import { QuotePreviewViewer, type QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
 import type { CadImportResult } from "@utils/index";
@@ -45,7 +47,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createBopCatalog, createCustomer, getAllBopCatalog, getAllCustomers, getAllMaterials, getAllMachines } from "../db/queries";
+import { createBopCatalog, createCustomer, getAllBopCatalog, getAllCustomers, getAllMaterials, getAllMachines, getCustomerById } from "../db/queries";
 import type { BopCatalogItem, Customer } from "../db/schema";
 import {
   buildMachineCatalog,
@@ -70,7 +72,7 @@ import {
    Reference data — loaded from DB (Material library / Machines & rates)
    =========================================================== */
 
-type MaterialMeta = { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number>; isPurchased: boolean };
+type MaterialMeta = { label: string; density: number; hex: string; grade: string; forms: string[]; rates: Record<string, number>; isPurchased: boolean; isActive: boolean };
 type MachineMeta  = { label: string; rate: number; short: string };
 // Mutable maps populated from the DB at app start. Cost utilities read from these.
 const MATERIALS: Record<string, MaterialMeta> = {};
@@ -103,7 +105,7 @@ let catalogInflight: Promise<void> | null = null;
 async function loadCatalog(): Promise<void> {
   if (catalogInflight) return catalogInflight;
   catalogInflight = (async () => {
-    const [mats, machs] = await Promise.all([getAllMaterials(true), getAllMachines(true)]);
+    const [mats, machs] = await Promise.all([getAllMaterials(false), getAllMachines(false)]);
     for (const k of Object.keys(MATERIALS)) delete MATERIALS[k];
     for (const k of Object.keys(MACHINES))  delete MACHINES[k];
     for (const k of Object.keys(MATERIAL_COSTS)) delete MATERIAL_COSTS[k];
@@ -119,6 +121,7 @@ async function loadCatalog(): Promise<void> {
         forms: m.availableForms || [],
         rates: m.formRates || {},
         isPurchased: (m.category || "").toLowerCase() === "purchased",
+        isActive: m.isActive,
       };
     }
     for (const m of machs) {
@@ -148,8 +151,7 @@ function normalizeStock(stock: Stock | null): Stock | null {
   return { shape: "rect", dims: { L: 80, W: 50, H: 25 } };
 }
 
-let __opSeq = 100;
-const opId = () => `op-${++__opSeq}`;
+const opId = () => `op-${crypto.randomUUID()}`;
 
 
 /* ===========================================================
@@ -159,6 +161,12 @@ const opId = () => `op-${++__opSeq}`;
 // Effective per-kg rate for a part: per-quote override wins, otherwise falls back to the material library.
 function partRate(p: Part): number {
   return effectivePartRate(p, MATERIAL_COSTS);
+}
+function materialLabel(materialId: string): string {
+  return MATERIALS[materialId]?.label || "Unknown material";
+}
+function partMaterialLabel(part: Part): string {
+  return part.materialLabelSnapshot?.trim() || (part.material ? materialLabel(part.material) : "—");
 }
 
 function stockMassKg(stock: Stock|null, materialId: string): number {
@@ -180,6 +188,18 @@ function opCost(op: Op, qty: number): number {
   return calculateOperationCost(op, qty, MACHINE_COSTS);
 }
 function opMinutes(op: Op, qty: number): number { return calculateOperationMinutes(op, qty); }
+function machineLabel(machineId: string): string {
+  return MACHINES[machineId]?.label || "Unknown machine";
+}
+function machineShortLabel(machineId: string): string {
+  return MACHINES[machineId]?.short || MACHINES[machineId]?.label || "Unknown";
+}
+function opMachineLabel(op: Op): string {
+  return op.machineLabelSnapshot?.trim() || (op.machine ? machineLabel(op.machine) : "—");
+}
+function opMachineShortLabel(op: Op): string {
+  return op.machineLabelSnapshot?.trim() || (op.machine ? machineShortLabel(op.machine) : "—");
+}
 
 function partMachineCost(p: Part, asmQty: number): number {
   return calculatePartSetupCost(p, MACHINE_COSTS) + calculatePartMachineCost(p, asmQty, MACHINE_COSTS);
@@ -191,18 +211,24 @@ function partSubtotal(p: Part, asmQty: number): number {
   return calculatePartSubtotal(p, asmQty, MATERIAL_COSTS, MACHINE_COSTS);
 }
 
-function rollup(parts: Part[], asmQty: number, commercial: { marginPct:number; taxPct:number }, bops: Array<{ qtyPerAssembly: number; unitCost: number }> = []) {
+function rollup(
+  parts: Part[],
+  asmQty: number,
+  commercial: { marginPct:number; taxPct:number },
+  bops: Array<{ qtyPerAssembly: number; unitCost: number }> = [],
+  extraCosts: Array<{ amount: number }> = [],
+) {
   // Apply per-batch tooling/inspection only after a part has real configured
   // cost (material + ops) — or there are BOPs to price. Otherwise an
   // empty/just-added part would show overhead totals like ₹672 even when its
   // own material/machining is ₹0.
   const probe = calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
-    toolingCost: 0, inspectionCost: 0, bops,
+    toolingCost: 0, inspectionCost: 0, bops, extraCosts,
   });
   if (probe.partsCost <= 0 && probe.bopCost <= 0) return probe;
   return calculateQuoteRollup(parts, asmQty, commercial, MATERIAL_COSTS, MACHINE_COSTS, {
     toolingCost: 0, inspectionCost: 0,
-    bops,
+    bops, extraCosts,
   });
 }
 
@@ -279,17 +305,17 @@ async function downloadBytes(fileName: string, bytes: Uint8Array, mimeType: stri
 // Issuing-company info shown on the quotation. Replace with real values when the
 // app gains a settings screen; this is the only place to edit branding today.
 const COMPANY_INFO = {
-  name: "KAIVALYA ENGINEERING",
-  addressLines: ["Pavana Industrial Premises, Bhoseri, PCMC, Pune 411044"],
+  name: "PACIFIC INDIA VENTURE",
+  addressLines: ["Tapkir Plaza, Nigdi, PCMC, Pune 411044"],
   phone: "9527352858",
-  email: "info@kaivalya.co.in",
+  email: "pacificindia.pcmcpune@gmail.com",
   gstn: "27AAKPF1080D1Z4",
   state: "Maharashtra",
   stateCode: "27",
   tagline: "Manufacturing & Supply of SPM, Precision Tools, Die & Components",
-  contactPerson: "Mr. Vijay More",
-  contactPhone: "9011025799",
-  contactEmail: "info@kaivalya.co.in",
+  contactPerson: "N. CHANDRA",
+  contactPhone: "9527352858",
+  contactEmail: "pacificindia.pcmcpune@gmail.com",
 };
 
 const QUOTATION_TERMS = [
@@ -300,114 +326,148 @@ const QUOTATION_TERMS = [
   "Freight: Charged extra at actuals.",
 ];
 
+// Cache the logo bytes after the first fetch so subsequent exports are instant.
+let _logoBytesCache: Uint8Array | null = null;
+async function loadCompanyLogoBytes(): Promise<Uint8Array | null> {
+  if (_logoBytesCache) return _logoBytesCache;
+  try {
+    const response = await fetch(pacificIndiaLogoUrl);
+    if (!response.ok) return null;
+    const buffer = await response.arrayBuffer();
+    _logoBytesCache = new Uint8Array(buffer);
+    return _logoBytesCache;
+  } catch {
+    return null;
+  }
+}
+
+// Convert a "data:image/png;base64,..." dataURL (e.g. from a canvas snapshot)
+// to raw bytes for pdf-lib's embedPng. Returns null for falsy/invalid input.
+function dataUrlToBytes(dataUrl: string | null): Uint8Array | null {
+  if (!dataUrl) return null;
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  const b64 = dataUrl.slice(comma + 1);
+  try {
+    const binary = atob(b64);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 function fmtQuotationDate(d: Date): string {
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
-function partUnitLabel(part: Part): string {
-  return (part.perAssembly || 1) > 1 ? "Set" : "Nos";
-}
-
-function partDescription(part: Part): string {
-  const material = MATERIALS[part.material];
-  const bits: string[] = [];
-  if (material?.label) bits.push(material.label);
-  if (part.stock) bits.push(fmtStockDims(part.stock));
-  if (part.operations.length > 0) {
-    const ops = part.operations
-      .map(op => MACHINES[op.machine]?.short || MACHINES[op.machine]?.label || op.machine)
-      .filter(Boolean)
-      .join(" • ");
-    if (ops) bits.push(`Process: ${ops}`);
-  }
-  return bits.length > 0
-    ? `(Complete as per model provided. ${bits.join(" · ")})`
-    : "(Complete as per model provided, precision finished & work suitable)";
-}
-
 function buildQuotationData(args: {
   rfq: { customer: string; customerId: string | null; project: string; rfqRef: string; notes: string };
   parts: Part[];
   bops: Bop[];
+  extraCosts: ExtraCost[];
   asmQty: number;
   commercial: { marginPct: number; taxPct: number };
   quoteNumber: string | null;
+  /** Full customer record from DB; when present, fills the "To" block with address, phone, email, and contact name. */
+  customerRecord?: Customer | null;
 }): QuotationData {
   const included = args.parts.filter(p => p.included);
-  const totals = rollup(args.parts, args.asmQty, args.commercial, args.bops);
+  const totals = rollup(args.parts, args.asmQty, args.commercial, args.bops, args.extraCosts);
   const grandTotal = Math.round(totals.total);
 
-  // BOPs ride the same margin/tax multiplier as parts. Allocate their share of
-  // the grand total proportionally to unit-cost × qty so each BOP's printed
-  // line total reflects the markup, and the remainder is the parts allocation.
-  const bopShareDenom = totals.partsCost + totals.bopCost + totals.tooling + totals.inspection;
-  const bopGrandShare = bopShareDenom > 0 ? totals.bopCost / bopShareDenom : 0;
-  const bopGrand = Math.round(grandTotal * bopGrandShare);
-  const partsGrand = grandTotal - bopGrand;
-
-  // Pro-rata allocation of overheads + margin + tax across parts, so the
-  // parts items sum to partsGrand regardless of per-part composition.
-  const partRaw = included.map(part => ({
-    part,
-    raw:
-      partMaterialCost(part, args.asmQty) +
-      partMachineCost(part, args.asmQty),
-  }));
-  const rawSum = partRaw.reduce((s, p) => s + p.raw, 0);
-
-  const items: QuotationLineItem[] = partRaw.map(({ part, raw }, idx) => {
-    const qty = partQty(part, args.asmQty);
-    const share = rawSum > 0 ? raw / rawSum : 1 / Math.max(1, partRaw.length);
-    let allocated = idx === partRaw.length - 1
-      ? partsGrand - partRaw.slice(0, idx).reduce((s, p) => {
-          const sh = rawSum > 0 ? p.raw / rawSum : 1 / Math.max(1, partRaw.length);
-          return s + Math.round(partsGrand * sh);
-        }, 0)
-      : Math.round(partsGrand * share);
-    if (!Number.isFinite(allocated) || allocated < 0) allocated = 0;
-    const unitPrice = qty > 0 ? allocated / qty : 0;
-    const materialLabel = MATERIALS[part.material]?.label || part.material;
-    return {
-      partNumber: part.name,
-      description: partDescription(part),
-      materialNote: materialLabel ? `Job Material – ${materialLabel}` : "Job Material – As required",
-      qty,
-      unit: partUnitLabel(part),
-      unitPrice,
-      totalPrice: allocated,
-    };
-  });
-
-  const bopList = args.bops.filter(b => b.qtyPerAssembly > 0 && b.unitCost >= 0);
-  const bopRaws = bopList.map(b => Math.max(0, b.unitCost) * Math.max(0, b.qtyPerAssembly) * Math.max(0, args.asmQty));
-  const bopRawSum = bopRaws.reduce((s, v) => s + v, 0);
-  const bopItems: QuotationLineItem[] = bopList.map((bop, idx) => {
-    const qty = Math.max(0, bop.qtyPerAssembly) * Math.max(0, args.asmQty);
-    const share = bopRawSum > 0 ? bopRaws[idx]! / bopRawSum : 1 / Math.max(1, bopList.length);
-    const allocated = idx === bopList.length - 1
-      ? bopGrand - bopRaws.slice(0, idx).reduce((s, r) => {
-          const sh = bopRawSum > 0 ? r / bopRawSum : 1 / Math.max(1, bopList.length);
-          return s + Math.round(bopGrand * sh);
-        }, 0)
-      : Math.round(bopGrand * share);
-    const unitPrice = qty > 0 ? allocated / qty : 0;
-    const descBits = [bop.supplier].filter(Boolean).join(" � ");
-    return {
-      partNumber: bop.name,
-      description: descBits ? `(Brought-out part — ${descBits})` : "(Brought-out part)",
-      materialNote: "Purchased component",
-      qty,
-      unit: "Nos",
-      unitPrice,
-      totalPrice: allocated,
-    };
-  });
-  items.push(...bopItems);
+  // Page 1 is a single rolled-up line — the customer sees one job priced at
+  // the grand total. Per-part / BOP / extra-cost detail lives on pages 2-4.
+  // Qty maps to the assembly count; unit becomes "Set" when >1, else "Nos".
+  const asmQty = Math.max(1, args.asmQty);
+  const unitPrice = grandTotal / asmQty;
+  const projectName = args.rfq.project?.trim() || args.quoteNumber || "Job Work";
+  const items: QuotationLineItem[] = [{
+    partNumber: projectName,
+    description: "(Complete set as per model provided, Precision finished & work suitable)",
+    materialNote: "Job Material – As required",
+    qty: asmQty,
+    unit: asmQty > 1 ? "Set" : "Nos",
+    unitPrice,
+    totalPrice: grandTotal,
+  }];
 
   const refLabel = args.quoteNumber || args.rfq.rfqRef || "DRAFT";
-  const customerAddress = args.rfq.project ? [args.rfq.project] : ["—"];
+
+  // Build the "To" block address lines from the customer DB record when we
+  // have it. Falls back to "—" only when we have absolutely nothing — never
+  // use the project name as the address (that's a separate field, not the
+  // customer's location).
+  const cust = args.customerRecord;
+  const customerName = cust?.company?.trim() || args.rfq.customer?.trim() || cust?.name?.trim() || "—";
+  const customerLines: string[] = [];
+  if (cust?.address?.trim()) {
+    // Address often arrives as a single multi-line text blob — split on
+    // newlines or commas to render as separate lines in the bill-to block.
+    const addr = cust.address.trim();
+    const parts = addr.includes("\n") ? addr.split(/\r?\n/) : addr.split(",");
+    for (const p of parts) {
+      const line = p.trim();
+      if (line) customerLines.push(line);
+    }
+  }
+  // Contact person (the `name` field in the customer record) only when it
+  // differs from the company name — otherwise it's redundant noise.
+  if (cust?.name?.trim() && cust.name.trim() !== customerName) {
+    customerLines.push(`Kind Attn: ${cust.name.trim()}`);
+  }
+  const contactBits: string[] = [];
+  if (cust?.phone?.trim()) contactBits.push(`Phone: ${cust.phone.trim()}`);
+  if (cust?.email?.trim()) contactBits.push(`Email: ${cust.email.trim()}`);
+  customerLines.push(...contactBits);
+  if (customerLines.length === 0) customerLines.push("—");
+
+  // Page 2: per-part materials. Only included && non-purchased parts — a
+  // purchased part has no stock/material relationship to print. We strip the
+  // "· ID X" trailer that fmtStockDims appends for hollow round stock — the
+  // inner diameter is a manufacturing detail the customer doesn't need on the
+  // quotation, and it surprises users when it shows up unexpectedly (e.g.
+  // legacy parts migrated from the old "tube" shape carry an ID value).
+  const partMaterials = included
+    .filter(p => !MATERIALS[p.material]?.isPurchased)
+    .map(p => {
+      const matLabel = partMaterialLabel(p);
+      const dims = p.stock ? fmtStockDims(p.stock).replace(/\s*·\s*ID\s+\d+(?:\.\d+)?\s*$/i, "") : "—";
+      return {
+        partName: p.name,
+        material: matLabel,
+        dimensions: dims,
+        ratePerKg: partRate(p),
+        cost: partMaterialCost(p, args.asmQty),
+      };
+    });
+
+  // Page 3: per-part operations. Keep every included part visible, even if it
+  // has no operations, by emitting one grouped section per part.
+  const partOperationGroups = included.map(p => ({
+    partName: p.name,
+    operations: p.operations.length === 0
+      ? []
+      : p.operations.map(op => ({
+          operation: opMachineLabel(op),
+          ratePerHour: opRate(op),
+          cost: opCost(op, partQty(p, args.asmQty)),
+        })),
+  }));
+
+  // Page 4: BOPs (quote-level). Rendered at unit cost — no margin baked in.
+  // Skip rows with zero/invalid amounts (matches the page-1 filter).
+  const bopBreakdown = args.bops
+    .filter(b => b.qtyPerAssembly > 0 && b.unitCost >= 0)
+    .map(b => ({
+      name: b.name || "—",
+      qtyPerAssembly: b.qtyPerAssembly,
+      unitCost: b.unitCost,
+      totalCost: b.unitCost * b.qtyPerAssembly * Math.max(0, args.asmQty),
+    }));
 
   return {
     company: {
@@ -421,8 +481,8 @@ function buildQuotationData(args: {
       tagline: COMPANY_INFO.tagline,
     },
     customer: {
-      name: args.rfq.customer || "—",
-      addressLines: customerAddress,
+      name: customerName,
+      addressLines: customerLines,
     },
     meta: {
       srNo: refLabel,
@@ -441,6 +501,9 @@ function buildQuotationData(args: {
       email: COMPANY_INFO.contactEmail,
     },
     fileName: `${refLabel || "quotation"}.pdf`,
+    partMaterials,
+    partOperationGroups,
+    bopBreakdown,
   };
 }
 
@@ -484,13 +547,17 @@ function QuotePreview({ onOpenViewer }: { onOpenViewer?: () => void }) {
    CAD preview (real Three.js model)
    =========================================================== */
 
-function QuoteCadPreview({ model, selectedId, selectedMeshIds, showAll }: {
+function QuoteCadPreview({ model, selectedId, selectedMeshIds, showAll, viewerRef: externalViewerRef }: {
   model: CadImportResult;
   selectedId: string | null;
   selectedMeshIds: string[];
   showAll: boolean;
+  viewerRef?: MutableRefObject<QuotePreviewViewerHandle | null>;
 }) {
-  const viewerRef = useRef<QuotePreviewViewerHandle | null>(null);
+  const localViewerRef = useRef<QuotePreviewViewerHandle | null>(null);
+  // Use the parent-provided ref when available so the export pipeline can
+  // grab a snapshot; otherwise fall back to a local ref for the fit() effect.
+  const viewerRef = externalViewerRef ?? localViewerRef;
   const isolate = !showAll && selectedId !== null && selectedMeshIds.length > 0;
 
   const selectedMeshIdSet = useMemo(() => new Set(selectedMeshIds), [selectedMeshIds]);
@@ -548,7 +615,7 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
   }
   function updateMaterial(newMat: string) {
     // Material changed → clear the per-part rate override.
-    onChange({ material: newMat, materialRateOverride: null });
+    onChange({ material: newMat, materialLabelSnapshot: materialLabel(newMat), materialRateOverride: null });
   }
   function updateRate(v: number) {
     onChange({ materialRateOverride: v });
@@ -568,7 +635,7 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
           onChange={e => updateMaterial(e.target.value)}
         >
           {!MATERIALS[part.material] && <option value="">Select material…</option>}
-          {Object.entries(MATERIALS).filter(([, m]) => !m.isPurchased).map(([k, m]) => (
+          {Object.entries(MATERIALS).filter(([, m]) => m.isActive && !m.isPurchased).map(([k, m]) => (
             <option key={k} value={k}>{m.label}</option>
           ))}
         </select>
@@ -625,7 +692,7 @@ function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onCh
   function move(i:number, dir:number) { const list=part.operations.slice(); const j=i+dir; if (j<0||j>=list.length) return; [list[i],list[j]]=[list[j],list[i]]; onChange({operations:list}); }
   function add() {
     const defaultMachine = Object.keys(MACHINES)[0] ?? "";
-    onChange({operations:[...part.operations,{id:opId(),machine:defaultMachine,setupMin:5,cycleMin:1}]});
+    onChange({operations:[...part.operations,{id:opId(),machine:defaultMachine,machineLabelSnapshot: machineLabel(defaultMachine),setupMin:5,cycleMin:1}]});
   }
   const totalMin=part.operations.reduce((a,op)=>a+opMinutes(op,qty),0);
   const totalCost=partMachineCost(part,qty/(part.perAssembly||1));
@@ -657,7 +724,7 @@ function OperationsEditor({ part, qty, onChange }: { part:Part; qty:number; onCh
               <span className="op-idx">{i + 1}</span>
             </span>
             <div className="op-col-machine">
-              <select aria-label="Machine" value={op.machine} onChange={e => update(op.id, { machine: e.target.value, rateOverride: null })}>
+              <select aria-label="Machine" value={op.machine} onChange={e => update(op.id, { machine: e.target.value, machineLabelSnapshot: machineLabel(e.target.value), rateOverride: null })}>
                 {Object.entries(MACHINES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </div>
@@ -718,7 +785,7 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
   const sub = partSubtotal(p, asmQty);
   const ops = p.operations || [];
   const totalMin = ops.reduce((a, op) => a + opMinutes(op, qty), 0);
-  const machineTags = ops.slice(0, 3).map(o => MACHINES[o.machine]?.short || o.machine);
+  const machineTags = ops.slice(0, 3).map(o => opMachineShortLabel(o));
   return (
     <tr className={`${isSel?"sel":""} ${!p.included?"excluded":""} ${isExpanded?"row-expanded":""}`} onClick={() => onSelect(p.id)}>
       <td className="include-cell"><input type="checkbox" aria-label={`Include ${p.name} in quote`} checked={p.included} onClick={e=>e.stopPropagation()} onChange={()=>onUpdate(p.id,{included:!p.included})}/></td>
@@ -730,11 +797,13 @@ const PartRow = memo(function PartRow({ p, isSel, isExpanded, asmQty, onSelect, 
           onClick={e=>e.stopPropagation()}
           onChange={e=>onUpdate(p.id,{name:e.target.value})}
         />
-        <div className="pmeta">#{p.id}{p.stocked?" · purchased":" · machined"}
-          {!p.stocked&&p.stock&&<span className="stock-badge" style={{marginLeft:8}}><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{fmtStockDims(p.stock)}</span>}
-        </div>
+        {!p.stocked&&p.stock&&(
+          <div className="pmeta">
+            <span className="stock-badge"><span className="shape-ic"><ShapeIcon shape={p.stock.shape} size={11}/></span>{fmtStockDims(p.stock)}</span>
+          </div>
+        )}
       </div></div></td>
-      <td>{(() => { const m = MATERIALS[p.material]; return m ? <span className="material-chip"><span className="swatch" style={{background:m.hex}}/>{m.label}</span> : <span className="muted" style={{fontSize:11}}>—</span>; })()}</td>
+      <td>{p.material ? <span className="material-chip"><span className="swatch" style={{background:MATERIALS[p.material]?.hex ?? colorForMaterial(p.material)}}/>{partMaterialLabel(p)}</span> : <span className="muted" style={{fontSize:11}}>—</span>}</td>
       <td className="num"><input type="number" className="qty-input" aria-label={`Per-assembly quantity for ${p.name}`} value={p.perAssembly} onClick={e=>e.stopPropagation()} onChange={e=>onUpdate(p.id,{perAssembly:+e.target.value||0})}/></td>
       <td className="num muted">{qty}</td>
       <td>{ops.length===0?<span className="muted" style={{fontSize:11}}>—</span>:<div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><span className="ops-pill"><Cog size={10}/> {fmtMin(totalMin)} min · {ops.length} ops</span><span className="muted" style={{fontSize:10.5,fontFamily:"var(--font-mono)"}}>{machineTags.join(" · ")}{ops.length>3?` +${ops.length-3}`:""}</span></div>}</td>
@@ -813,8 +882,8 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAddPart, 
     if (filter==="purchased"&&!p.stocked) return false;
     if (filter==="excluded"&&p.included) return false;
     if (q) {
-      const hay=`${p.name} ${p.id} ${MATERIALS[p.material]?.label||""}`.toLowerCase();
-      const opsMatch=(p.operations||[]).some(op=>(MACHINES[op.machine]?.label||"").toLowerCase().includes(q));
+      const hay=`${p.name} ${p.id} ${partMaterialLabel(p)}`.toLowerCase();
+      const opsMatch=(p.operations||[]).some(op=>opMachineLabel(op).toLowerCase().includes(q));
       if (!hay.includes(q)&&!opsMatch) return false;
     }
     return true;
@@ -843,7 +912,7 @@ function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAddPart, 
             <div className="bulk-menu">
               <div className="section">Apply to {filtered.length} visible parts</div>
               <div className="section" style={{paddingTop:0}}>Material</div>
-              {Object.entries(MATERIALS).filter(([,m])=>!m.isPurchased).map(([k,v])=><div className="opt" key={k} onClick={()=>bulkApply({material:k})}><span className="swatch" style={{background:v.hex}}/><span>{v.label}</span></div>)}
+              {Object.entries(MATERIALS).filter(([,m])=>m.isActive&&!m.isPurchased).map(([k,v])=><div className="opt" key={k} onClick={()=>bulkApply({material:k, materialLabelSnapshot:v.label})}><span className="swatch" style={{background:v.hex}}/><span>{v.label}</span></div>)}
               <div className="div"/>
               <div className="opt" onClick={()=>bulkApply({included:true})}><Check size={13}/> Include all visible</div>
               <div className="opt danger" onClick={()=>bulkApply({included:false})}><X size={13}/> Exclude all visible</div>
@@ -1284,11 +1353,14 @@ function QuoteCustomerModal({
   );
 }
 
-function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: {
+function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops, extraCosts, getCadSnapshot }: {
   parts:Part[];
   asmQty:number; setAsmQty:(v:number)=>void;
   commercial:{marginPct:number;taxPct:number}; setCommercial:(v:{marginPct:number;taxPct:number})=>void;
   bops: Bop[];
+  extraCosts: ExtraCost[];
+  /** Capture an isometric snapshot of the CAD preview. Returns null when no model is loaded or preview is hidden. */
+  getCadSnapshot?: () => string | null;
 }) {
   const { id } = useParams<{ id: string }>();
   const {
@@ -1306,7 +1378,7 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
   } = useQuoteState();
   const navigate = useNavigate();
   const [tab, setTab] = useState<"inputs"|"notes">("inputs");
-  const r=rollup(parts,asmQty,commercial,bops);
+  const r=rollup(parts,asmQty,commercial,bops,extraCosts);
   const totalQty=parts.filter(p=>p.included).reduce((a,p)=>a+partQty(p,asmQty),0);
   const unit=asmQty>0?r.total/asmQty:0;
   const isSaving = persistenceStatus === "saving";
@@ -1342,8 +1414,19 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
       return;
     }
     try {
-      const data = buildQuotationData({ rfq, parts, bops, asmQty, commercial, quoteNumber });
-      const pdf = await exportQuotationPdf(data);
+      await loadCatalog();
+      const [logoBytes, cadSnapshotPng, customerRecord] = await Promise.all([
+        loadCompanyLogoBytes(),
+        Promise.resolve(dataUrlToBytes(getCadSnapshot?.() ?? null)),
+        rfq.customerId ? getCustomerById(rfq.customerId).catch(() => null) : Promise.resolve(null),
+      ]);
+      const data = buildQuotationData({ rfq, parts, bops, extraCosts, asmQty, commercial, quoteNumber, customerRecord });
+      const pdf = await exportQuotationPdf({
+        ...data,
+        logoBytes,
+        logoMime: "image/jpeg",
+        cadSnapshotPng,
+      });
       if (!pdf.ok) throw new Error(pdf.reason);
       await downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
     } catch (error) {
@@ -1376,7 +1459,6 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
                 onChange={customer => setRfq({ ...rfq, ...customer })}
               />
               <Field label="Project" value={rfq.project} onChange={v=>setRfq({...rfq, project:String(v)})}/>
-              <Field label="Inquiry ref" value={rfq.rfqRef} onChange={v=>setRfq({...rfq, rfqRef:String(v)})}/>
             </div>
             <div className="rfq-fields" style={{paddingTop:8}}>
               <div className="full"><div className="eyebrow">Commercial · whole quote</div></div>
@@ -1445,10 +1527,10 @@ function RfqRail({ parts, asmQty, setAsmQty, commercial, setCommercial, bops }: 
    Cost panel (memoized — doesn't depend on selection)
    =========================================================== */
 
-const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
-  parts: Part[]; asmQty: number; commercial: { marginPct: number; taxPct: number }; bops: Bop[];
+const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops, extraCosts }: {
+  parts: Part[]; asmQty: number; commercial: { marginPct: number; taxPct: number }; bops: Bop[]; extraCosts: ExtraCost[];
 }) {
-  const r = rollup(parts, asmQty, commercial, bops);
+  const r = rollup(parts, asmQty, commercial, bops, extraCosts);
 
   const cat = { material: 0, machine: 0, setup: 0, finish: 0 };
   parts.forEach(p => {
@@ -1462,7 +1544,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
     });
   });
 
-  const machineBreakdown: Record<string, { cost: number; mins: number }> = {};
+  const machineBreakdown: Record<string, { cost: number; mins: number; label: string }> = {};
   parts.forEach(p => {
     if (!p.included) return;
     const qty = partQty(p, asmQty);
@@ -1470,7 +1552,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
       const rate = opRate(op);
       const cost = (op.setupMin / 60) * rate + (op.cycleMin / 60) * rate * qty;
       const mins = op.setupMin + op.cycleMin * qty;
-      machineBreakdown[op.machine] = machineBreakdown[op.machine] || { cost: 0, mins: 0 };
+      machineBreakdown[op.machine] = machineBreakdown[op.machine] || { cost: 0, mins: 0, label: opMachineLabel(op) };
       machineBreakdown[op.machine].cost += cost;
       machineBreakdown[op.machine].mins += mins;
     });
@@ -1498,6 +1580,8 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
         <div className="cost-row right"><span className="k">BOP subtotal</span><span className="v">{fmtINR(r.bopCost)}</span></div>
         <div className="cost-row left"><span className="k">Margin · {commercial.marginPct}%</span><span className="v">{fmtINR(r.margin)}</span></div>
         <div className="cost-row right"><span className="k">Tax</span><span className="v">{fmtINR(r.tax)}</span></div>
+        <div className="cost-row left"><span className="k">Extra costs</span><span className="v">{fmtINR(r.extraCost)}</span></div>
+        <div className="cost-row right"><span className="k">Total</span><span className="v">{fmtINR(r.total)}</span></div>
       </div>
       {machineRows.length > 0 && (
         <>
@@ -1507,7 +1591,7 @@ const CostPanel = memo(function CostPanel({ parts, asmQty, commercial, bops }: {
               const pct = r.partsCost > 0 ? (info.cost / r.partsCost) * 100 : 0;
               return (
                 <div key={m} style={{display:"grid",gridTemplateColumns:"120px 1fr 80px 80px",alignItems:"center",gap:10,padding:"6px 0",fontSize:12}}>
-                  <span style={{color:"var(--text-2)"}}>{MACHINES[m]?.label || m}</span>
+                  <span style={{color:"var(--text-2)"}}>{info.label}</span>
                   <div style={{height:6,background:"var(--panel-3)",borderRadius:99,overflow:"hidden"}}><div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:"var(--accent)"}}/></div>
                   <span className="mono muted" style={{textAlign:"right",fontSize:11}}>{fmtMin(info.mins)} min</span>
                   <span className="mono" style={{textAlign:"right",fontSize:12}}>{fmtINR(info.cost)}</span>
@@ -1814,12 +1898,68 @@ const BopSection = memo(function BopSection({ bops, setBops, asmQty }: {
 });
 
 /* ===========================================================
+   Extra costs section — fixed post-tax line items
+   =========================================================== */
+
+const ExtraCostsSection = memo(function ExtraCostsSection({ extraCosts, setExtraCosts }: {
+  extraCosts: ExtraCost[];
+  setExtraCosts: Dispatch<SetStateAction<ExtraCost[]>>;
+}) {
+  const subtotal = extraCosts.reduce((s, r) => s + Math.max(0, r.amount), 0);
+  const updateAmount = (code: ExtraCost["code"], amount: number) => {
+    setExtraCosts(prev => prev.map(r => r.code === code ? { ...r, amount } : r));
+  };
+
+  return (
+    <div className="panel extra-costs-section">
+      <div className="panel-head bop-head">
+        <div className="bop-head-main">
+          <span className="title"><Layers size={13}/> Extra Costs</span>
+          <span className="sub">Added after tax · Subtotal {fmtINR(subtotal)}</span>
+        </div>
+      </div>
+      <table className="parts-table extra-costs-table">
+        <colgroup>
+          <col />
+          <col style={{ width: "22%", minWidth: 140 }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th className="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {extraCosts.map(row => (
+            <tr key={row.code}>
+              <td>{row.label}</td>
+              <td className="num">
+                <input
+                  className="qty-input"
+                  type="number" min={0} step={0.01}
+                  value={row.amount}
+                  onChange={e => updateAmount(row.code, Math.max(0, Number(e.target.value) || 0))}
+                />
+              </td>
+            </tr>
+          ))}
+          <tr className="totals">
+            <td>Extra costs subtotal</td>
+            <td className="num">{fmtINR(subtotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+});
+
+/* ===========================================================
    Quote workspace
    =========================================================== */
 
 function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onOpenViewer:()=>void }) {
   const { cad, pendingHandoff, consumeHandoff } = useCad();
-  const { parts, setParts, bops, setBops, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
+  const { parts, setParts, bops, setBops, extraCosts, setExtraCosts, selectedId, setSelectedId, asmQty, setAsmQty, commercial, setCommercial, saveQuote, persistenceStatus, rfq, projectNameSource, setProjectAuto, savedCadFileName } = useQuoteState();
   const [reattachPrompt, setReattachPrompt] = useState<{
     incomingFile: string;
     existingFile: string;
@@ -1834,6 +1974,10 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
   }, [persistenceStatus]);
   const loadSettled = wasLoading && persistenceStatus !== "loading";
   const [showAll, setShowAll] = useState(false);
+  // Hoisted here so RfqRail's PDF export can snapshot the live preview viewer
+  // (mounted inside <QuoteCadPreview> on another branch of the tree).
+  const previewViewerRef = useRef<QuotePreviewViewerHandle | null>(null);
+  const getCadSnapshot = useCallback(() => previewViewerRef.current?.screenshot() ?? null, []);
   const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem("quote.previewCollapsed") === "1"; } catch { return false; }
   });
@@ -1912,7 +2056,7 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
   }, [pendingHandoff, loadSettled, savedCadFileName, cad, completeHandoff]);
 
   const addManualPart = useCallback(() => {
-    const defaultMaterial = Object.entries(MATERIALS).find(([, m]) => !m.isPurchased)?.[0]
+    const defaultMaterial = Object.entries(MATERIALS).find(([, m]) => m.isActive && !m.isPurchased)?.[0]
       ?? Object.keys(MATERIALS)[0]
       ?? "";
     const id = `part-${crypto.randomUUID()}`;
@@ -1922,6 +2066,7 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
       name: `Part ${nextIndex}`,
       color: colorForMaterial(defaultMaterial || id),
       material: defaultMaterial,
+      materialLabelSnapshot: materialLabel(defaultMaterial),
       perAssembly: 1,
       mass: 0,
       finishing: 0,
@@ -1999,16 +2144,21 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery:string; onO
                   // mesh in the scene, leaving the preview blank.
                   return p?.meshIds && p.meshIds.length > 0 ? p.meshIds : [];
                 })()}
-                showAll={showAll}/>
+                showAll={showAll}
+                viewerRef={previewViewerRef}/>
             : <QuotePreview onOpenViewer={onOpenViewer}/>)}
         </div>
-        <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial} bops={bops}/>
+        <RfqRail parts={parts} asmQty={asmQty} setAsmQty={setAsmQty} commercial={commercial} setCommercial={setCommercial} bops={bops} extraCosts={extraCosts} getCadSnapshot={getCadSnapshot}/>
       </div>
-      <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} onAddPart={addManualPart} searchQuery={searchQuery}/>
+      <div className="quote-main-col">
+        <PartsTable parts={parts} setParts={setParts} asmQty={asmQty} selectedId={selectedId} onSelect={setSelectedId} onAddPart={addManualPart} searchQuery={searchQuery}/>
 
-      <BopSection bops={bops} setBops={setBops} asmQty={asmQty}/>
+        <BopSection bops={bops} setBops={setBops} asmQty={asmQty}/>
 
-      <CostPanel parts={parts} asmQty={asmQty} commercial={commercial} bops={bops}/>
+        <ExtraCostsSection extraCosts={extraCosts} setExtraCosts={setExtraCosts}/>
+
+        <CostPanel parts={parts} asmQty={asmQty} commercial={commercial} bops={bops} extraCosts={extraCosts}/>
+      </div>
     </div>
     {reattachPrompt && (
       <div className="modal-overlay" onClick={() => {
@@ -2052,7 +2202,7 @@ declare global {
 export function QuoteDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { rfq, quoteId, quoteNumber, quoteStatus, persistenceStatus, persistenceError, loadQuote, clearPersistenceError } = useQuoteState();
+  const { rfq, quoteId, quoteNumber, quoteStatus, persistenceStatus, persistenceError, loadQuote, clearPersistenceError, changeStatus } = useQuoteState();
   const searchQuery = "";
 
   useEffect(() => {
@@ -2114,6 +2264,23 @@ export function QuoteDetailPage() {
             </>}
           </div>
         </div>
+        {quoteId && (
+          <div style={{ marginLeft: "auto" }}>
+            <select
+              value={quoteStatus}
+              onChange={e => void changeStatus(e.target.value as typeof quoteStatus)}
+              className="status-select"
+              aria-label="Quote status"
+            >
+              <option value="draft">Draft</option>
+              <option value="review">Review</option>
+              <option value="sent">Sent</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
+              <option value="expired">Expired</option>
+            </select>
+          </div>
+        )}
       </div>
       {persistenceError && (
         <div className="quote-page-error">
@@ -2132,14 +2299,3 @@ export function QuoteDetailPage() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-

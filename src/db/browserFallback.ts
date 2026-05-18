@@ -14,6 +14,7 @@ import type {
   NewQuote,
   NewQuoteBop,
   NewQuoteCadSource,
+  NewQuoteExtraCost,
   NewRfq,
   Part,
   PartGeometry,
@@ -22,6 +23,8 @@ import type {
   Quote,
   QuoteBop,
   QuoteCadSource,
+  QuoteExtraCost,
+  QuoteExtraCostCode,
   QuoteStatus,
   Rfq,
   RfqStatus,
@@ -38,6 +41,7 @@ type BrowserDb = {
   partStock: PartStock[];
   quoteBops: QuoteBop[];
   quoteCadSources: QuoteCadSource[];
+  quoteExtraCosts: QuoteExtraCost[];
   quotes: Quote[];
   rfqs: Rfq[];
 };
@@ -130,6 +134,7 @@ const initialDb: BrowserDb = {
     { id: "bop-6204-bearing", name: "Deep groove bearing 6204-2RS", supplier: "SKF", unitCost: 185, currency: "INR", notes: null, createdAt: seedDate, updatedAt: seedDate },
   ],
   quoteBops: [],
+  quoteExtraCosts: [],
 };
 
 function reviveDates<T>(value: T): T {
@@ -185,6 +190,7 @@ function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
   db.parts = db.parts.filter(row => row.quoteId !== quoteId);
   db.quoteCadSources = db.quoteCadSources.filter(row => row.quoteId !== quoteId);
   db.quoteBops = db.quoteBops.filter(row => row.quoteId !== quoteId);
+  db.quoteExtraCosts = db.quoteExtraCosts.filter(row => row.quoteId !== quoteId);
 }
 
 function deletePartsForQuoteRows(db: BrowserDb, quoteId: string): void {
@@ -677,6 +683,50 @@ export const browserDb = {
     db.quoteBops = db.quoteBops.filter(row => row.quoteId !== quoteId);
     writeDb(db);
   },
+
+  getQuoteExtraCostsByQuote(quoteId: string): QuoteExtraCost[] {
+    return readDb().quoteExtraCosts
+      .filter(row => row.quoteId === quoteId)
+      .sort(bySortOrder);
+  },
+  upsertQuoteExtraCost(
+    data: Omit<NewQuoteExtraCost, "createdAt" | "updatedAt"> & { id?: string },
+  ): QuoteExtraCost {
+    const db = readDb();
+    const index = db.quoteExtraCosts.findIndex(
+      row => row.quoteId === data.quoteId && row.code === data.code,
+    );
+    if (index >= 0) {
+      db.quoteExtraCosts[index] = {
+        ...db.quoteExtraCosts[index]!,
+        label: data.label,
+        amount: data.amount ?? 0,
+        sortOrder: data.sortOrder ?? db.quoteExtraCosts[index]!.sortOrder,
+        updatedAt: now(),
+      };
+      writeDb(db);
+      return db.quoteExtraCosts[index]!;
+    }
+    const row: QuoteExtraCost = {
+      id: data.id ?? newId("qxc"),
+      quoteId: data.quoteId,
+      code: data.code as QuoteExtraCostCode,
+      label: data.label,
+      amount: data.amount ?? 0,
+      sortOrder: data.sortOrder ?? 0,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    db.quoteExtraCosts.push(row);
+    writeDb(db);
+    return row;
+  },
+  deleteQuoteExtraCostsForQuote(quoteId: string): void {
+    const db = readDb();
+    db.quoteExtraCosts = db.quoteExtraCosts.filter(row => row.quoteId !== quoteId);
+    writeDb(db);
+  },
 };
+
 
 

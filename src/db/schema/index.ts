@@ -10,6 +10,7 @@ export * from "./part_stock";
 export * from "./parts";
 export * from "./quote_bops";
 export * from "./quote_cad_sources";
+export * from "./quote_extra_costs";
 export * from "./quotes";
 export * from "./recent_files";
 export * from "./rfqs";

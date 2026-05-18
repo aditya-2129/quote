@@ -849,7 +849,15 @@ a { text-decoration: none; color: inherit; }
 .quote-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(220px, 360px);
-  grid-template-rows: auto auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.quote-main-col {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
@@ -860,13 +868,14 @@ a { text-decoration: none; color: inherit; }
 @media (max-width: 1050px) {
   .quote-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto;
   }
   .quote-grid .right-col {
-    display: contents;
+    grid-row: 1;
+    grid-column: 1;
+    position: static;
   }
   .quote-grid .right-col .preview-panel {
-    grid-row: 1; grid-column: 1;
     position: sticky;
     top: 0;
     z-index: 5;
@@ -876,39 +885,34 @@ a { text-decoration: none; color: inherit; }
     margin-top: -16px;
     padding-top: 0;
   }
-  .quote-grid .right-col .rfq-panel {
-    grid-row: 2; grid-column: 1;
-    position: static;
-  }
-  .quote-grid .parts-panel { grid-row: 3; grid-column: 1; }
-  .quote-grid .bop-section { grid-row: 4; grid-column: 1; }
-  .quote-grid .cost-panel  { grid-row: 5; grid-column: 1; }
+  .quote-grid .quote-main-col { grid-row: 2; grid-column: 1; }
 }
 
-.parts-panel   { grid-row: 1; grid-column: 1; min-width: 0; overflow-x: auto; }
-.bop-section   { grid-row: 2; grid-column: 1; align-self: start; }
+.parts-panel         { min-width: 0; overflow-x: auto; }
+.bop-section         { align-self: stretch; }
 .bop-section .customer-menu { /* dropdown escapes the panel — z-index keeps it above siblings */ z-index: 50; }
-.cost-panel    { grid-row: 3; grid-column: 1; }
+.extra-costs-section { align-self: stretch; }
+.cost-panel          { align-self: stretch; }
 
 /* Right column wraps the compact preview + RFQ rail in a single sticky cell.
    Stacking them inside one cell (rather than across grid rows) means the RFQ
    sits flush under the preview and never inherits empty space from a tall
    main-column row above. */
 .right-col {
-  grid-row: 1 / span 2;
+  grid-row: 1;
   grid-column: 2;
   position: sticky;
   top: 0;
   align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   max-height: calc(100vh - 132px);
 }
 
 .preview-panel {
-  flex: 0 1 240px;
-  min-height: 160px;
+  flex: 0 0 auto;
+  min-height: 0;
   display: flex; flex-direction: column;
   transition: flex-basis 0.15s ease;
 }
@@ -1763,6 +1767,9 @@ a { text-decoration: none; color: inherit; }
 }
 
 .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; }
+
+.status-select { appearance: none; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-1); cursor: pointer; font-size: 12.5px; font-family: var(--font-sans); padding: 5px 28px 5px 10px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+.status-select:focus { outline: none; border-color: var(--accent); }
 
 .empty { padding: 40px 20px; text-align: center; color: var(--text-3); font-size: 13px; }
 

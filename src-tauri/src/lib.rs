@@ -45,6 +45,18 @@ pub fn run() {
       sql: include_str!("../migrations/0007_bop.sql"),
       kind: MigrationKind::Up,
     },
+    Migration {
+      version: 8,
+      description: "drop_bop_part_number",
+      sql: include_str!("../migrations/0008_drop_bop_part_number.sql"),
+      kind: MigrationKind::Up,
+    },
+    Migration {
+      version: 9,
+      description: "quote_extra_costs",
+      sql: include_str!("../migrations/0009_quote_extra_costs.sql"),
+      kind: MigrationKind::Up,
+    },
   ];
 
   tauri::Builder::default()

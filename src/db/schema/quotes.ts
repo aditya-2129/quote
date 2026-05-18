@@ -12,6 +12,8 @@ export interface QuoteCostSnapshot {
   subtotal: number;
   margin: number;
   tax: number;
+  /** Fixed extra-cost line items (post-tax). Optional for backwards compat with snapshots written before extra costs existed. */
+  extraCost?: number;
   total: number;
   unitPrice: number;
   currency: string;

@@ -5,6 +5,8 @@ import type { CadImportResult } from "@utils/index";
 
 export type QuotePreviewViewerHandle = {
   fit: (meshIds?: string[]) => void;
+  /** Render an isometric snapshot at the given size and return PNG dataURL. Resets the camera to default framing first; restores size after. Returns null if the scene isn't ready. */
+  screenshot: (width?: number, height?: number) => string | null;
 };
 
 type Props = {
@@ -34,6 +36,7 @@ export function QuotePreviewViewer({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
   const recordsRef = useRef<Record[]>([]);
   // Render-on-demand: requestRender() schedules a single rAF; the frame loop
   // only spins while damping is settling, then stops.
@@ -70,15 +73,91 @@ export function QuotePreviewViewer({
     requestRenderRef.current();
   };
 
-  useImperativeHandle(ref, () => ({ fit }));
+  const screenshot = (width = 600, height = 540): string | null => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const scene = sceneRef.current;
+    if (!renderer || !camera || !controls || !scene) return null;
+
+    // Save current viewport + per-mesh visibility / highlight so the on-screen
+    // preview snaps back unchanged after the snapshot.
+    const prevSize = new THREE.Vector2();
+    renderer.getSize(prevSize);
+    const prevAspect = camera.aspect;
+    const prevVisibility = recordsRef.current.map(r => ({
+      mesh: r.mesh.visible,
+      edges: r.edges.visible,
+      emissive: r.materials.map(m => ({ color: m.emissive.clone(), intensity: m.emissiveIntensity })),
+      edgeColor: r.edgeMaterial.color.clone(),
+      edgeOpacity: r.edgeMaterial.opacity,
+    }));
+
+    // Force the full assembly into view: every mesh visible, no selection
+    // highlight. The user might have a single part isolated for editing — the
+    // exported quotation should still show the whole assembly.
+    recordsRef.current.forEach((r) => {
+      r.mesh.visible = true;
+      r.edges.visible = true;
+      r.materials.forEach(m => {
+        m.emissive.set("#000000");
+        m.emissiveIntensity = 0;
+      });
+      r.edgeMaterial.color.set("#111827");
+      r.edgeMaterial.opacity = 0.38;
+    });
+
+    // Resize for the snapshot and reset camera to default isometric framing.
+    // The third arg `updateStyle=false` keeps the DOM canvas style at its
+    // current size so the user doesn't see a flicker; only the drawing buffer
+    // grows for the snapshot.
+    renderer.setSize(width, height, false);
+    camera.aspect = width / Math.max(height, 1);
+    camera.updateProjectionMatrix();
+    fit(); // bounds expand to include every now-visible mesh
+    controls.update();
+    renderer.render(scene, camera);
+
+    // toDataURL must run synchronously after render(): the WebGL drawing
+    // buffer isn't preserved across frames (preserveDrawingBuffer = false).
+    const dataUrl = renderer.domElement.toDataURL("image/png");
+
+    // Restore visibility + highlight.
+    recordsRef.current.forEach((r, i) => {
+      const prev = prevVisibility[i];
+      if (!prev) return;
+      r.mesh.visible = prev.mesh;
+      r.edges.visible = prev.edges;
+      r.materials.forEach((m, j) => {
+        const e = prev.emissive[j];
+        if (!e) return;
+        m.emissive.copy(e.color);
+        m.emissiveIntensity = e.intensity;
+      });
+      r.edgeMaterial.color.copy(prev.edgeColor);
+      r.edgeMaterial.opacity = prev.edgeOpacity;
+    });
+
+    // Restore the live preview size + camera.
+    renderer.setSize(prevSize.x, prevSize.y, true);
+    camera.aspect = prevAspect;
+    camera.updateProjectionMatrix();
+    controls.update();
+    renderer.render(scene, camera);
+
+    return dataUrl;
+  };
+
+  useImperativeHandle(ref, () => ({ fit, screenshot }));
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
 
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.domElement.style.display = "block";
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.width = "100%";
@@ -214,6 +293,7 @@ export function QuotePreviewViewer({
       rendererRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      sceneRef.current = null;
     };
   }, [model]);
 

@@ -1,5 +1,5 @@
 import type { PdfExportResult } from "../types";
-import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, rgb } from "pdf-lib";
 
 /* ===========================================================
    Public types
@@ -46,6 +46,37 @@ export type QuotationContact = {
   delivery?: string;
 };
 
+export type QuotationPartMaterial = {
+  partName: string;
+  material: string;
+  dimensions: string;
+  ratePerKg: number;
+  cost: number;
+};
+
+export type QuotationPartOperation = {
+  partName: string;
+  operation: string;
+  ratePerHour: number;
+  cost: number;
+};
+
+export type QuotationPartOperationGroup = {
+  partName: string;
+  operations: Array<{
+    operation: string;
+    ratePerHour: number;
+    cost: number;
+  }>;
+};
+
+export type QuotationBopBreakdown = {
+  name: string;
+  qtyPerAssembly: number;
+  unitCost: number;
+  totalCost: number;
+};
+
 export type QuotationData = {
   company: QuotationCompany;
   customer: QuotationCustomer;
@@ -57,6 +88,18 @@ export type QuotationData = {
   terms: string[];
   contact: QuotationContact;
   fileName?: string;
+  /** Optional company logo as JPG/PNG bytes. When provided, replaces the initials circle on page 1. */
+  logoBytes?: Uint8Array | null;
+  /** Mime hint for logoBytes — "image/jpeg" or "image/png" (defaults to jpg if omitted). */
+  logoMime?: "image/jpeg" | "image/png";
+  /** Optional CAD snapshot PNG bytes for the page-1 reference image box. When omitted, the box is hidden. */
+  cadSnapshotPng?: Uint8Array | null;
+  /** Page-2 rows: per-part material breakdown. Page is skipped if empty. */
+  partMaterials?: QuotationPartMaterial[];
+  /** Page-3 rows: per-part operations. Page is skipped if empty. */
+  partOperationGroups?: QuotationPartOperationGroup[];
+  /** Page-4 rows: BOP breakdown. Page is skipped if empty. */
+  bopBreakdown?: QuotationBopBreakdown[];
 };
 
 /* ===========================================================
@@ -82,7 +125,13 @@ const C = {
    Text helpers
    =========================================================== */
 
-type DrawCtx = { page: PDFPage; font: PDFFont; bold: PDFFont; italic: PDFFont };
+type DrawCtx = {
+  page: PDFPage;
+  font: PDFFont;
+  bold: PDFFont;
+  italic: PDFFont;
+  logo: PDFImage | null;
+};
 
 // pdf-lib's StandardFonts (Helvetica family) only encode WinAnsi/CP1252. Map
 // the Unicode symbols our app emits to ASCII fallbacks so the exporter never
@@ -180,25 +229,6 @@ function drawVerticalLine(
   page.drawLine({ start: { x, y: y1 }, end: { x, y: y2 }, thickness, color });
 }
 
-function drawBox(
-  page: PDFPage,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  opts: { stroke?: ReturnType<typeof rgb>; fill?: ReturnType<typeof rgb>; strokeWidth?: number } = {},
-) {
-  page.drawRectangle({
-    x,
-    y,
-    width: w,
-    height: h,
-    borderColor: opts.stroke,
-    borderWidth: opts.strokeWidth ?? (opts.stroke ? 0.75 : 0),
-    color: opts.fill,
-  });
-}
-
 /* ===========================================================
    Money + number-to-words
    =========================================================== */
@@ -264,35 +294,47 @@ export function rupeesInWords(amount: number): string {
    =========================================================== */
 
 function drawHeader(ctx: DrawCtx, company: QuotationCompany, top: number): number {
-  const headerH = 82;
+  const headerH = 68;
   const logoSize = 56;
   const logoX = MARGIN_X + 8;
-  const logoY = top - (headerH + logoSize) / 2 + 4;
+  const logoY = top - (headerH + logoSize) / 2 + 2;
 
-  const initials = company.name
-    .split(/\s+/)
-    .map(w => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() || "Q";
+  if (ctx.logo) {
+    // Embedded logo image (e.g. company brand mark). Drawn square in the slot
+    // that the initials circle would otherwise occupy.
+    ctx.page.drawImage(ctx.logo, {
+      x: logoX,
+      y: logoY,
+      width: logoSize,
+      height: logoSize,
+    });
+  } else {
+    // Fallback for tenants without a logo asset: circle-with-initials.
+    const initials = company.name
+      .split(/\s+/)
+      .map(w => w[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "Q";
 
-  ctx.page.drawCircle({
-    x: logoX + logoSize / 2,
-    y: logoY + logoSize / 2,
-    size: logoSize / 2,
-    borderColor: C.accent,
-    borderWidth: 2,
-  });
-  const initSize = 22;
-  const initWidth = textWidth(ctx.bold, initials, initSize);
-  drawText(ctx, initials, logoX + logoSize / 2 - initWidth / 2, logoY + logoSize / 2 - 7, {
-    font: ctx.bold,
-    size: initSize,
-    color: C.accent,
-  });
+    ctx.page.drawCircle({
+      x: logoX + logoSize / 2,
+      y: logoY + logoSize / 2,
+      size: logoSize / 2,
+      borderColor: C.accent,
+      borderWidth: 2,
+    });
+    const initSize = 22;
+    const initWidth = textWidth(ctx.bold, initials, initSize);
+    drawText(ctx, initials, logoX + logoSize / 2 - initWidth / 2, logoY + logoSize / 2 - 7, {
+      font: ctx.bold,
+      size: initSize,
+      color: C.accent,
+    });
+  }
 
-  let cy = top - 18;
+  let cy = top - 16;
   const nameSize = 17;
   const nameWidth = textWidth(ctx.bold, company.name, nameSize);
   drawText(ctx, company.name, RIGHT_INNER - nameWidth, cy, {
@@ -300,18 +342,18 @@ function drawHeader(ctx: DrawCtx, company: QuotationCompany, top: number): numbe
     size: nameSize,
     color: C.ink,
   });
-  cy -= 14;
+  cy -= 13;
 
   for (const line of company.addressLines) {
     const w = textWidth(ctx.font, line, 9);
     drawText(ctx, line, RIGHT_INNER - w, cy, { size: 9, color: C.ink });
-    cy -= 11;
+    cy -= 10;
   }
 
   const phoneEmail = `Mo. ${company.phone}, Email ${company.email}`;
   const pew = textWidth(ctx.font, phoneEmail, 9);
   drawText(ctx, phoneEmail, RIGHT_INNER - pew, cy, { size: 9, color: C.ink });
-  cy -= 11;
+  cy -= 10;
 
   const gst = `GSTN : ${company.gstn} | STATE : ${company.state} CODE:${company.stateCode}`;
   const gw = textWidth(ctx.font, gst, 8.5);
@@ -326,20 +368,30 @@ function drawHeader(ctx: DrawCtx, company: QuotationCompany, top: number): numbe
    =========================================================== */
 
 function drawBillTo(ctx: DrawCtx, customer: QuotationCustomer, meta: QuotationMeta, top: number): number {
-  const blockH = 90;
   const splitX = MARGIN_X + 310;
+  const leftX = MARGIN_X + 40;
+  const leftMaxWidth = splitX - leftX - 14;
+  const lineStep = 12;
+
+  const leftLines: Array<{ text: string; size: number; font?: PDFFont }> = [];
+  leftLines.push({ text: customer.name, size: 10.5, font: ctx.bold });
+  for (const line of customer.addressLines) {
+    for (const wrapped of wrapText(ctx.font, line, 9.5, leftMaxWidth)) {
+      leftLines.push({ text: wrapped, size: 9.5 });
+    }
+  }
+  if (customer.gstin) {
+    for (const wrapped of wrapText(ctx.font, `GSTIN/UIN : ${customer.gstin}`, 9.5, leftMaxWidth)) {
+      leftLines.push({ text: wrapped, size: 9.5 });
+    }
+  }
 
   // To label
   let ly = top - 16;
   drawText(ctx, "To", MARGIN_X + 6, ly, { font: ctx.bold, size: 10 });
-  drawText(ctx, customer.name, MARGIN_X + 40, ly, { font: ctx.bold, size: 10.5 });
-  ly -= 14;
-  for (const line of customer.addressLines) {
-    drawText(ctx, line, MARGIN_X + 40, ly, { size: 9.5 });
-    ly -= 12;
-  }
-  if (customer.gstin) {
-    drawText(ctx, `GSTIN/UIN : ${customer.gstin}`, MARGIN_X + 40, ly, { size: 9.5 });
+  for (const line of leftLines) {
+    drawText(ctx, line.text, leftX, ly, { font: line.font, size: line.size });
+    ly -= lineStep;
   }
 
   // Meta panel
@@ -359,6 +411,8 @@ function drawBillTo(ctx: DrawCtx, customer: QuotationCustomer, meta: QuotationMe
   }
 
   // Vertical divider
+  const renderedLines = Math.max(leftLines.length, rows.length);
+  const blockH = 16 + (renderedLines - 1) * lineStep + 8;
   drawVerticalLine(ctx.page, splitX, top - blockH, top, 0.75, C.rule);
   // Bottom rule
   drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, top - blockH, 1.0, C.ink);
@@ -386,7 +440,7 @@ function drawTagline(ctx: DrawCtx, tagline: string, top: number): number {
 
 function drawTitle(ctx: DrawCtx, top: number): number {
   const h = 32;
-  const label = "QUOTATION";
+  const label = "QUOTATION - JOB WORK";
   const size = 20;
   const w = textWidth(ctx.bold, label, size);
   drawText(ctx, label, PAGE_W / 2 - w / 2, top - 24, { font: ctx.bold, size });
@@ -404,20 +458,40 @@ function drawItemsTable(
   currencyLabel: string,
   top: number,
 ): number {
-  // Columns
+  // Left-anchored columns
   const colSr = MARGIN_X;
   const colPart = MARGIN_X + 40;
-  const colQty = MARGIN_X + 340;
-  const colUnit = MARGIN_X + 400;
-  const colTotal = MARGIN_X + 470;
+  // Numeric columns are right-anchored (we right-align headers + values to
+  // these X coords) so the longest label — "Total Price (INR)" — stays inside
+  // the page border. The previous left-anchored layout overflowed by ~15 px.
+  // Anchors leave room for the widest header in each column:
+  //   "Unit Price" (~52 px) + gutter must fit between qty and unit anchors;
+  //   "Total Price (INR)" (~85 px) + gutter must fit between unit and total
+  // anchors. The previous unitRightX=MARGIN_X+460 put the two headers' boxes
+  // into overlap with no visible gap between them.
+  const qtyRightX = MARGIN_X + 350;
+  const unitRightX = MARGIN_X + 435;
+  const totalRightX = COL_RIGHT_X - 4;
+
+  const drawRight = (
+    text: string,
+    rightX: number,
+    y: number,
+    opts: { size?: number; font?: PDFFont; color?: ReturnType<typeof rgb> } = {},
+  ) => {
+    const font = opts.font ?? ctx.font;
+    const size = opts.size ?? 9.5;
+    const w = textWidth(font, text, size);
+    drawText(ctx, text, rightX - w, y, opts);
+  };
 
   // Header row
   const headerH = 20;
   drawText(ctx, "Sr. No.", colSr + 2, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
   drawText(ctx, "Particular", colPart, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
-  drawText(ctx, "Qty.", colQty, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
-  drawText(ctx, "Unit Price", colUnit, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
-  drawText(ctx, `Total Price (${currencyLabel})`, colTotal, top - 14, {
+  drawRight("Qty.", qtyRightX, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
+  drawRight("Unit Price", unitRightX, top - 14, { font: ctx.bold, size: 9.5, color: C.muted });
+  drawRight(`Total Price (${currencyLabel})`, totalRightX, top - 14, {
     font: ctx.bold,
     size: 9.5,
     color: C.muted,
@@ -425,7 +499,10 @@ function drawItemsTable(
   drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, top - headerH, 0.75, C.rule);
 
   let y = top - headerH - 4;
-  const partColWidth = colQty - colPart - 8;
+  // Particular column ends where the Qty column starts. Qty's left edge is
+  // roughly its right edge minus its widest expected value (~20 px); keep an
+  // 8 px gutter before it for the description wrap-width budget.
+  const partColWidth = qtyRightX - 30 - colPart - 8;
 
   items.forEach((item, idx) => {
     const rowTopY = y;
@@ -447,10 +524,10 @@ function drawItemsTable(
     }
 
     // Right-side numeric cells aligned to row top
-    drawText(ctx, `${item.qty}`, colQty + 2, rowTopY - 11, { size: 9.5 });
-    drawText(ctx, item.unit, colQty + 2, rowTopY - 23, { size: 9.5 });
-    drawText(ctx, fmtMoney(item.unitPrice), colUnit, rowTopY - 11, { size: 9.5 });
-    drawText(ctx, fmtMoney(item.totalPrice), colTotal, rowTopY - 11, {
+    drawRight(`${item.qty}`, qtyRightX, rowTopY - 11, { size: 9.5 });
+    drawRight(item.unit, qtyRightX, rowTopY - 23, { size: 9.5 });
+    drawRight(fmtMoney(item.unitPrice), unitRightX, rowTopY - 11, { size: 9.5 });
+    drawRight(fmtMoney(item.totalPrice), totalRightX, rowTopY - 11, {
       font: ctx.bold,
       size: 9.5,
     });
@@ -465,6 +542,18 @@ function drawItemsTable(
 /* ===========================================================
    Section: grand total + words + note
    =========================================================== */
+
+// Mirrors the layout in drawGrandTotal so the caller can pin the block to a
+// specific bottom Y (e.g. just above the terms block). Returns the total
+// vertical space the block consumes from `top` down to its closing rule.
+function grandTotalBlockHeight(ctx: DrawCtx, notes: string | undefined): number {
+  if (notes && notes.trim()) {
+    const noteLines = wrapText(ctx.font, notes.trim(), 9, COL_RIGHT_X - MARGIN_X - 60);
+    const k = Math.min(3, noteLines.length);
+    return 82 + k * 11;
+  }
+  return 76;
+}
 
 function drawGrandTotal(
   ctx: DrawCtx,
@@ -519,17 +608,22 @@ function drawTermsAndSignature(
   ctx: DrawCtx,
   terms: string[],
   companyName: string,
+  cadSnapshot: PDFImage | null,
   top: number,
 ): number {
   const blockH = TERMS_BLOCK_H;
   const bottom = top - blockH;
-  const splitX = MARGIN_X + 340;
+  // When there's no CAD snapshot to render, terms + signature take the full
+  // page width — otherwise they're confined to the left column with the
+  // snapshot on the right.
+  const splitX = cadSnapshot ? MARGIN_X + 340 : COL_RIGHT_X;
+  const textRight = cadSnapshot ? splitX : COL_RIGHT_X;
 
   drawText(ctx, "Terms & Conditions", MARGIN_X + 8, top - 16, { font: ctx.bold, size: 10 });
   let ty = top - 32;
   for (const term of terms) {
     drawText(ctx, "•", MARGIN_X + 10, ty, { font: ctx.bold, size: 9.5 });
-    const lines = wrapText(ctx.font, term, 9, splitX - MARGIN_X - 32);
+    const lines = wrapText(ctx.font, term, 9, textRight - MARGIN_X - 32);
     for (const line of lines) {
       drawText(ctx, line, MARGIN_X + 22, ty, { size: 9 });
       ty -= 11;
@@ -539,7 +633,7 @@ function drawTermsAndSignature(
 
   ty -= 6;
   const thanks = "We look forward to your valuable order and assure you of our best quality and timely service.";
-  const thanksLines = wrapText(ctx.italic, thanks, 8.5, splitX - MARGIN_X - 16);
+  const thanksLines = wrapText(ctx.italic, thanks, 8.5, textRight - MARGIN_X - 16);
   for (const line of thanksLines) {
     drawText(ctx, line, MARGIN_X + 8, ty, {
       font: ctx.italic,
@@ -554,21 +648,30 @@ function drawTermsAndSignature(
   drawText(ctx, "Authorized Signature", MARGIN_X + 8, sigBaseY, { font: ctx.bold, size: 9.5 });
   drawText(ctx, `for ${companyName}`, MARGIN_X + 8, sigBaseY + 42, { font: ctx.bold, size: 10 });
 
-  // Drawing placeholder on right
-  drawBox(ctx.page, splitX + 10, bottom + 10, COL_RIGHT_X - splitX - 18, blockH - 20, {
-    stroke: C.ruleSoft,
-  });
-  const ph = "Reference drawing / model image";
-  const phw = textWidth(ctx.italic, ph, 9);
-  drawText(
-    ctx,
-    ph,
-    splitX + 10 + (COL_RIGHT_X - splitX - 18) / 2 - phw / 2,
-    bottom + blockH / 2,
-    { font: ctx.italic, size: 9, color: C.muted },
-  );
+  if (cadSnapshot) {
+    const boxX = splitX + 10;
+    const boxY = bottom + 10;
+    const boxW = COL_RIGHT_X - splitX - 18;
+    const boxH = blockH - 20;
+    // Fit the snapshot inside the box preserving aspect ratio.
+    const imgAspect = cadSnapshot.width / Math.max(1, cadSnapshot.height);
+    const boxAspect = boxW / boxH;
+    let drawW = boxW;
+    let drawH = boxH;
+    if (imgAspect > boxAspect) {
+      drawH = boxW / imgAspect;
+    } else {
+      drawW = boxH * imgAspect;
+    }
+    ctx.page.drawImage(cadSnapshot, {
+      x: boxX + (boxW - drawW) / 2,
+      y: boxY + (boxH - drawH) / 2,
+      width: drawW,
+      height: drawH,
+    });
+    drawVerticalLine(ctx.page, splitX, bottom, top, 0.75, C.rule);
+  }
 
-  drawVerticalLine(ctx.page, splitX, bottom, top, 0.75, C.rule);
   drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, bottom, 1.0, C.ink);
   return bottom;
 }
@@ -598,31 +701,53 @@ function drawFooterBlock(ctx: DrawCtx, contact: QuotationContact, top: number) {
 
   // Contact table
   const tableH = 44;
-  const colW = (COL_RIGHT_X - MARGIN_X) / 4;
-  const headers = ["CONTACT PERSON NAME", "CALL", "EMAIL", "DELEVERY"];
+  // Asymmetric column widths: EMAIL holds ~155 px of address text, so even
+  // splits (~134 px each) push it into the DELIVERY column. Widen EMAIL,
+  // narrow DELIVERY (usually blank) and CALL (short phone numbers).
+  const colWidths = [115, 90, 210, 120]; // sums to 535 = COL_RIGHT_X - MARGIN_X
+  const colStarts: number[] = [];
+  {
+    let cursorX = MARGIN_X;
+    for (const w of colWidths) {
+      colStarts.push(cursorX);
+      cursorX += w;
+    }
+  }
+  const headers = ["CONTACT PERSON NAME", "CALL", "EMAIL", "DELIVERY"];
   const values = [contact.name, contact.phone, contact.email, contact.delivery ?? ""];
 
-  // Headers (bold, centered)
+  // Headers (bold, centered within their column). Auto-shrink any header
+  // that overflows — "CONTACT PERSON NAME" at size 9 bold is ~120 px and
+  // would touch the column divider in a 115 px column.
   const headerRowY = contactTop - 16;
   headers.forEach((h, i) => {
-    const cx = MARGIN_X + colW * i + colW / 2;
-    const w = textWidth(ctx.bold, h, 9);
-    drawText(ctx, h, cx - w / 2, headerRowY, { font: ctx.bold, size: 9 });
+    const colW = colWidths[i]!;
+    const cellPad = 4;
+    let size = 9;
+    while (size > 7 && textWidth(ctx.bold, h, size) > colW - cellPad * 2) size -= 0.5;
+    const cx = colStarts[i]! + colW / 2;
+    const w = textWidth(ctx.bold, h, size);
+    drawText(ctx, h, cx - w / 2, headerRowY, { font: ctx.bold, size });
   });
   const headerBottomY = contactTop - 22;
   drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, headerBottomY, 0.5, C.rule);
 
-  // Values
+  // Values — auto-shrink any cell that still overflows its column (e.g. a
+  // very long email). Drops from 9 → 8 → 7 until it fits or 7 is reached.
   const valueRowY = headerBottomY - 16;
   values.forEach((v, i) => {
-    const cx = MARGIN_X + colW * i + colW / 2;
-    const w = textWidth(ctx.font, v, 9);
-    drawText(ctx, v, cx - w / 2, valueRowY, { size: 9 });
+    const colW = colWidths[i]!;
+    const cellPad = 4;
+    let size = 9;
+    while (size > 7 && textWidth(ctx.font, v, size) > colW - cellPad * 2) size -= 0.5;
+    const w = textWidth(ctx.font, v, size);
+    const cx = colStarts[i]! + colW / 2;
+    drawText(ctx, v, cx - w / 2, valueRowY, { size });
   });
 
-  // Vertical dividers
+  // Vertical dividers — drawn at each interior column boundary.
   for (let i = 1; i < 4; i++) {
-    drawVerticalLine(ctx.page, MARGIN_X + colW * i, contactTop - tableH, contactTop, 0.5, C.rule);
+    drawVerticalLine(ctx.page, colStarts[i]!, contactTop - tableH, contactTop, 0.5, C.rule);
   }
   const tableBottom = contactTop - tableH;
   drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, tableBottom, 0.75, C.rule);
@@ -638,17 +763,272 @@ function drawFooterBlock(ctx: DrawCtx, contact: QuotationContact, top: number) {
 }
 
 /* ===========================================================
+   Continuation pages (page 2+)
+   =========================================================== */
+
+// Compact header used on pages 2..N. Smaller than the cover-page header but
+// still carries the brand mark + company name so each page is self-identifying.
+function drawCompactHeader(
+  ctx: DrawCtx,
+  company: QuotationCompany,
+  pageTitle: string,
+  meta: QuotationMeta,
+  top: number,
+): number {
+  const headerH = 56;
+  const logoSize = 40;
+  const logoX = MARGIN_X + 6;
+  const logoY = top - headerH + 8;
+
+  if (ctx.logo) {
+    ctx.page.drawImage(ctx.logo, { x: logoX, y: logoY, width: logoSize, height: logoSize });
+  }
+
+  // Company name + GST line, centered between logo and the meta block.
+  const nameX = logoX + logoSize + 12;
+  drawText(ctx, company.name, nameX, top - 18, { font: ctx.bold, size: 12 });
+  drawText(ctx, `GSTN : ${company.gstn}`, nameX, top - 31, { size: 8.5, color: C.muted });
+  drawText(ctx, pageTitle, nameX, top - 45, { font: ctx.bold, size: 10, color: C.accent });
+
+  // Right-aligned meta (SR. NO. + DATE) for cross-referencing the cover page.
+  const metaLines = [`SR. NO. : ${meta.srNo || "—"}`, `DATE : ${meta.date}`];
+  let my = top - 18;
+  for (const line of metaLines) {
+    const w = textWidth(ctx.font, line, 9);
+    drawText(ctx, line, RIGHT_INNER - w, my, { size: 9 });
+    my -= 12;
+  }
+
+  drawHorizontalLine(ctx.page, MARGIN_X, COL_RIGHT_X, top - headerH, 1.0, C.ink);
+  return top - headerH;
+}
+
+// Generic table renderer used by all continuation pages.
+type TableColumn = {
+  label: string;
+  width: number;
+  align?: "left" | "right" | "center";
+  bold?: boolean;
+};
+
+function drawTable(
+  ctx: DrawCtx,
+  columns: TableColumn[],
+  rows: string[][],
+  top: number,
+): number {
+  const headerH = 22;
+  const rowH = 20;
+  const totalW = columns.reduce((s, c) => s + c.width, 0);
+  // Page is 535 px wide between margins — centre the table if it's narrower.
+  const xStart = MARGIN_X + Math.max(0, ((COL_RIGHT_X - MARGIN_X) - totalW) / 2);
+
+  // Top edge of the table — without this the header row appears to have no
+  // roof, since the vertical column dividers start at `top` but nothing
+  // connects them across.
+  drawHorizontalLine(ctx.page, xStart, xStart + totalW, top, 0.75, C.rule);
+
+  // Header row
+  let cx = xStart;
+  for (const col of columns) {
+    const labelW = textWidth(ctx.bold, col.label, 9);
+    let lx = cx + 4;
+    if (col.align === "right") lx = cx + col.width - labelW - 4;
+    else if (col.align === "center") lx = cx + (col.width - labelW) / 2;
+    drawText(ctx, col.label, lx, top - 14, { font: ctx.bold, size: 9, color: C.muted });
+    cx += col.width;
+  }
+  drawHorizontalLine(ctx.page, xStart, xStart + totalW, top - headerH, 0.75, C.rule);
+
+  // Body rows
+  let y = top - headerH;
+  for (const row of rows) {
+    cx = xStart;
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i]!;
+      const cell = row[i] ?? "";
+      const cellW = textWidth(col.bold ? ctx.bold : ctx.font, cell, 9.5);
+      let tx = cx + 4;
+      if (col.align === "right") tx = cx + col.width - cellW - 4;
+      else if (col.align === "center") tx = cx + (col.width - cellW) / 2;
+      drawText(ctx, cell, tx, y - 13, { size: 9.5, font: col.bold ? ctx.bold : ctx.font });
+      cx += col.width;
+    }
+    drawHorizontalLine(ctx.page, xStart, xStart + totalW, y - rowH, 0.25, C.ruleSoft);
+    y -= rowH;
+  }
+
+  // Vertical column dividers
+  let dx = xStart;
+  for (let i = 0; i <= columns.length; i++) {
+    drawVerticalLine(ctx.page, dx, y, top, 0.5, C.rule);
+    if (i < columns.length) dx += columns[i]!.width;
+  }
+
+  return y;
+}
+
+function drawPartMaterialsPage(
+  pdf: PDFDocument,
+  data: QuotationData,
+  logo: PDFImage | null,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+): void {
+  if (!data.partMaterials || data.partMaterials.length === 0) return;
+  const page = pdf.addPage([PAGE_W, PAGE_H]);
+  const ctx: DrawCtx = { page, font, bold, italic, logo };
+
+  let cursor = PAGE_H - MARGIN_X;
+  cursor = drawCompactHeader(ctx, data.company, "MATERIAL DETAILS", data.meta, cursor);
+
+  const columns: TableColumn[] = [
+    { label: "Sr.", width: 30, align: "center" },
+    { label: "Part Name", width: 130, bold: true },
+    { label: "Material", width: 110 },
+    { label: "Dimensions", width: 110 },
+    { label: `Rate (${data.currencyLabel}/kg)`, width: 70, align: "right" },
+    { label: `Cost (${data.currencyLabel})`, width: 85, align: "right" },
+  ];
+  const rows = data.partMaterials.map((m, i) => [
+    `${i + 1}`,
+    m.partName,
+    m.material,
+    m.dimensions,
+    fmtMoney(m.ratePerKg),
+    fmtMoney(m.cost),
+  ]);
+  drawTable(ctx, columns, rows, cursor - 8);
+
+  // Draw all four outer borders last so nothing overdraws them. Using the
+  // same 1.0 thickness on every side keeps the frame visually consistent —
+  // earlier versions drew a 1.5 top before content and the rest at 1.0,
+  // which made the top look weirdly faint in some PDF viewers.
+  drawVerticalLine(page, MARGIN_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawVerticalLine(page, COL_RIGHT_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, MARGIN_X, 1.0, C.ink);
+}
+
+function drawPartOperationsPage(
+  pdf: PDFDocument,
+  data: QuotationData,
+  logo: PDFImage | null,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+): void {
+  if (!data.partOperationGroups || data.partOperationGroups.length === 0) return;
+  const page = pdf.addPage([PAGE_W, PAGE_H]);
+  const ctx: DrawCtx = { page, font, bold, italic, logo };
+
+  let cursor = PAGE_H - MARGIN_X;
+  cursor = drawCompactHeader(ctx, data.company, "OPERATIONS & PROCESS DETAILS", data.meta, cursor);
+
+  const columns: TableColumn[] = [
+    { label: "Sr.", width: 30, align: "center" },
+    { label: "Part Name", width: 150, bold: true },
+    { label: "Operation", width: 180 },
+    { label: `Rate (${data.currencyLabel}/h)`, width: 80, align: "right" },
+    { label: `Cost (${data.currencyLabel})`, width: 95, align: "right" },
+  ];
+  const rows: string[][] = [];
+  let sr = 1;
+  for (const group of data.partOperationGroups) {
+    if (group.operations.length === 0) {
+      rows.push([`${sr++}`, group.partName, "—", "—", "—"]);
+      continue;
+    }
+    group.operations.forEach((op, idx) => {
+      rows.push([
+        idx === 0 ? `${sr}` : "",
+        idx === 0 ? group.partName : "",
+        op.operation,
+        fmtMoney(op.ratePerHour),
+        fmtMoney(op.cost),
+      ]);
+    });
+    sr += 1;
+  }
+  drawTable(ctx, columns, rows, cursor - 8);
+
+  // Draw all four outer borders last so nothing overdraws them. Using the
+  // same 1.0 thickness on every side keeps the frame visually consistent —
+  // earlier versions drew a 1.5 top before content and the rest at 1.0,
+  // which made the top look weirdly faint in some PDF viewers.
+  drawVerticalLine(page, MARGIN_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawVerticalLine(page, COL_RIGHT_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, MARGIN_X, 1.0, C.ink);
+}
+
+function drawBopBreakdownPage(
+  pdf: PDFDocument,
+  data: QuotationData,
+  logo: PDFImage | null,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+): void {
+  if (!data.bopBreakdown || data.bopBreakdown.length === 0) return;
+  const page = pdf.addPage([PAGE_W, PAGE_H]);
+  const ctx: DrawCtx = { page, font, bold, italic, logo };
+
+  let cursor = PAGE_H - MARGIN_X;
+  cursor = drawCompactHeader(ctx, data.company, "BROUGHT-OUT PARTS (BOP)", data.meta, cursor);
+
+  const columns: TableColumn[] = [
+    { label: "Sr.", width: 30, align: "center" },
+    { label: "Name", width: 220, bold: true },
+    { label: "Qty / Asm", width: 85, align: "right" },
+    { label: `Unit Cost (${data.currencyLabel})`, width: 100, align: "right" },
+    { label: `Total Cost (${data.currencyLabel})`, width: 100, align: "right" },
+  ];
+  const rows = data.bopBreakdown.map((b, i) => [
+    `${i + 1}`,
+    b.name,
+    `${b.qtyPerAssembly}`,
+    fmtMoney(b.unitCost),
+    fmtMoney(b.totalCost),
+  ]);
+  drawTable(ctx, columns, rows, cursor - 8);
+
+  // Draw all four outer borders last so nothing overdraws them. Using the
+  // same 1.0 thickness on every side keeps the frame visually consistent —
+  // earlier versions drew a 1.5 top before content and the rest at 1.0,
+  // which made the top look weirdly faint in some PDF viewers.
+  drawVerticalLine(page, MARGIN_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawVerticalLine(page, COL_RIGHT_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, PAGE_H - MARGIN_X, 1.0, C.ink);
+  drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, MARGIN_X, 1.0, C.ink);
+}
+
+/* ===========================================================
    Public API
    =========================================================== */
 
 export async function exportQuotationPdf(data: QuotationData): Promise<PdfExportResult> {
   try {
     const pdf = await PDFDocument.create();
-    const page = pdf.addPage([PAGE_W, PAGE_H]);
     const font = await pdf.embedFont(StandardFonts.Helvetica);
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
     const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
-    const ctx: DrawCtx = { page, font, bold, italic };
+
+    let logo: PDFImage | null = null;
+    if (data.logoBytes && data.logoBytes.byteLength > 0) {
+      logo = data.logoMime === "image/png"
+        ? await pdf.embedPng(data.logoBytes)
+        : await pdf.embedJpg(data.logoBytes);
+    }
+
+    let cadSnapshot: PDFImage | null = null;
+    if (data.cadSnapshotPng && data.cadSnapshotPng.byteLength > 0) {
+      cadSnapshot = await pdf.embedPng(data.cadSnapshotPng);
+    }
+
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    const ctx: DrawCtx = { page, font, bold, italic, logo };
 
     // Top outer border
     drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, PAGE_H - MARGIN_X, 1.5, C.ink);
@@ -659,24 +1039,32 @@ export async function exportQuotationPdf(data: QuotationData): Promise<PdfExport
     cursor = drawTagline(ctx, data.company.tagline, cursor);
     cursor = drawTitle(ctx, cursor);
     cursor = drawItemsTable(ctx, data.items, data.currencyLabel, cursor);
-    cursor = drawGrandTotal(ctx, data.grandTotal, data.currencyLabel, data.notes, cursor);
 
     // Footer + terms are pinned to the bottom of the page so the layout never
     // shifts based on item count.
     const FOOTER_H = 100;
     const footerTop = MARGIN_X + FOOTER_H;
     const termsTop = footerTop + TERMS_BLOCK_H;
-    drawTermsAndSignature(ctx, data.terms, data.company.name, termsTop);
+
+    // Grand total is pinned to sit directly above the terms block — any
+    // whitespace between items and grand total stays above (not below) it so
+    // the page bottom reads cleanly: items … gap … grand total | terms.
+    const grandTotalH = grandTotalBlockHeight(ctx, data.notes);
+    const grandTotalTop = Math.min(cursor, termsTop + grandTotalH);
+    drawGrandTotal(ctx, data.grandTotal, data.currencyLabel, data.notes, grandTotalTop);
+
+    drawTermsAndSignature(ctx, data.terms, data.company.name, cadSnapshot, termsTop);
     drawFooterBlock(ctx, data.contact, footerTop);
-    // cursor (the bottom of the grand total block) is the available items
-    // ceiling; if it lands below termsTop the items overflow into the fixed
-    // terms section. Acceptable for v1.
-    void cursor;
 
     // Left + right outer borders
     drawVerticalLine(page, MARGIN_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
     drawVerticalLine(page, COL_RIGHT_X, MARGIN_X, PAGE_H - MARGIN_X, 1.0, C.ink);
     drawHorizontalLine(page, MARGIN_X, COL_RIGHT_X, MARGIN_X, 1.0, C.ink);
+
+    // Continuation pages — each renderer no-ops when its payload is empty.
+    drawPartMaterialsPage(pdf, data, logo, font, bold, italic);
+    drawPartOperationsPage(pdf, data, logo, font, bold, italic);
+    drawBopBreakdownPage(pdf, data, logo, font, bold, italic);
 
     const bytes = await pdf.save();
     return {
