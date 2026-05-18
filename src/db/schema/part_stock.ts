@@ -15,7 +15,7 @@ export type StockShape =
  *  plate / block  → { L, W, H }
  *  round-bar      → { D, L }
  *  square-bar     → { side, L }
- *  tube           → { OD, ID, L }
+ *  tube           → { OD, L }
  */
 export type StockDims = Record<string, number>;
 

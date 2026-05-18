@@ -356,7 +356,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                     const { analysis } = bodyMeasure;
                     const fmt = (v: number) => `${v.toFixed(2)} mm`;
                     const label = analysis.kind === "cylinder"
-                      ? `Ø ${fmt(analysis.outerDiaMm)}${analysis.innerDiaMm != null ? ` · Inner Ø ${fmt(analysis.innerDiaMm)}` : ""} · Length ${fmt(analysis.lengthMm)}`
+                      ? `Ø ${fmt(analysis.outerDiaMm)} · Length ${fmt(analysis.lengthMm)}`
                       : analysis.kind === "hex"
                         ? `Hex AF ${fmt(analysis.afMm)} · Length ${fmt(analysis.lengthMm)}`
                         : `${fmt(analysis.xMm)} × ${fmt(analysis.yMm)} × ${fmt(analysis.zMm)}`;
@@ -446,7 +446,6 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                   <div className="kv"><span className="k">Bounding · Z</span><span className="v">{selectedStats.boundingBoxMm.z.toFixed(2)} mm</span></div>
                   {selectedShape?.kind === "cylinder" && <>
                     <div className="kv"><span className="k">Outer Ø</span><span className="v">{selectedShape.outerDiaMm.toFixed(2)} mm</span></div>
-                    {selectedShape.innerDiaMm != null && <div className="kv"><span className="k">Inner Ø</span><span className="v">{selectedShape.innerDiaMm.toFixed(2)} mm</span></div>}
                     <div className="kv"><span className="k">Length</span><span className="v">{selectedShape.lengthMm.toFixed(2)} mm</span></div>
                   </>}
                   {selectedShape?.kind === "hex" && <>

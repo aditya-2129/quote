@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Search, Bell, Minimize2, Maximize2, Minus, X, Command } from "lucide-react";
 import { KbdOverlay } from "./KbdOverlay";
+import brandLogo from "../assets/image.png";
 
 export function Header() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -12,7 +13,9 @@ export function Header() {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const maximized = await getCurrentWindow().isMaximized();
         setIsMaximized(maximized);
-      } catch { /* browser */ }
+      } catch {
+        /* browser */
+      }
     }
     check();
     window.addEventListener("resize", check);
@@ -23,7 +26,10 @@ export function Header() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       const inField = tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable;
-      if (e.key === "?" && !inField) { e.preventDefault(); setShortcutsOpen(o => !o); }
+      if (e.key === "?" && !inField) {
+        e.preventDefault();
+        setShortcutsOpen(o => !o);
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -33,7 +39,9 @@ export function Header() {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().minimize();
-    } catch { /* browser */ }
+    } catch {
+      /* browser */
+    }
   };
 
   const handleMaximize = async () => {
@@ -41,25 +49,25 @@ export function Header() {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().toggleMaximize();
-    } catch { /* browser */ }
+    } catch {
+      /* browser */
+    }
   };
 
   const handleClose = async () => {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
-    } catch { /* browser */ }
+    } catch {
+      /* browser */
+    }
   };
 
   return (
     <>
       <header className="topbar" data-tauri-drag-region>
         <div className="hd-brand">
-          <div className="mark">Q</div>
-          <div className="hd-brand-text">
-            <div className="wordmark">Quote</div>
-            <div className="hd-eyebrow">Locus Manufacturing</div>
-          </div>
+          <img className="brand-logo" src={brandLogo} alt="Pacific India Venture" />
         </div>
 
         <div className="topbar-divider" />
@@ -81,9 +89,15 @@ export function Header() {
         </div>
 
         <div className="win-controls">
-          <button className="win-btn" onClick={handleMinimize}><Minus size={14} /></button>
-          <button className="win-btn" onClick={handleMaximize}>{isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
-          <button className="win-btn close" onClick={handleClose}><X size={14} /></button>
+          <button className="win-btn" onClick={handleMinimize}>
+            <Minus size={14} />
+          </button>
+          <button className="win-btn" onClick={handleMaximize}>
+            {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+          <button className="win-btn close" onClick={handleClose}>
+            <X size={14} />
+          </button>
         </div>
       </header>
       {shortcutsOpen && <KbdOverlay onClose={() => setShortcutsOpen(false)} />}

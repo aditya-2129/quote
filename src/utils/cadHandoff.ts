@@ -11,7 +11,6 @@ function stockFromGeometry(geometry: import("three").BufferGeometry): Stock {
       dims: {
         D: round1(shape.outerDiaMm),
         L: round1(shape.lengthMm),
-        ID: shape.innerDiaMm != null ? round1(shape.innerDiaMm) : 0,
       },
     };
   }

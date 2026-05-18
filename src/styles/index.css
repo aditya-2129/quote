@@ -189,20 +189,14 @@ input, select, textarea {
 .hd-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex-shrink: 0;
 }
 .hd-brand-text { min-width: 0; line-height: 1.15; }
-.hd-eyebrow { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; margin-top: 1px; white-space: nowrap; }
-.topbar .mark {
-  width: 26px; height: 26px;
-  display: grid; place-items: center;
-  background: var(--accent);
-  color: var(--text-inverse);
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: -0.01em;
+.brand-logo {
+  display: block;
+  width: auto;
+  height: 34px;
+  max-width: 330px;
   flex-shrink: 0;
 }
 .topbar .wordmark { font-weight: 600; letter-spacing: -0.01em; font-size: 14px; white-space: nowrap; }

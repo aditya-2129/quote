@@ -240,7 +240,10 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
         return match ? { ...entry, label: match.label, amount: match.amount } : entry;
       }));
     }
-    setSelectedId(snapshot.parts[0]?.id ?? null);
+    setSelectedId(current => {
+      if (current && snapshot.parts.some(part => part.id === current)) return current;
+      return snapshot.parts[0]?.id ?? null;
+    });
     setLastSavedAt(snapshot.records.quote.updatedAt ?? null);
     lastSavedSignatureRef.current = draftSignature(snapshot);
     if (snapshot.cadSource) {
@@ -422,5 +425,4 @@ export function useQuoteState(): QuoteStateCtx {
   if (!ctx) throw new Error("useQuoteState must be used within QuoteStateProvider");
   return ctx;
 }
-
 

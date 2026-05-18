@@ -134,7 +134,7 @@ async function loadCatalog(): Promise<void> {
 
 const SHAPES: Record<string, { label: string; dims: string[] }> = {
   "rect":  { label: "Rect",  dims: ["L","W","H"] },
-  "round": { label: "Round", dims: ["D","L","ID"] },
+  "round": { label: "Round", dims: ["D","L"] },
   "hex":   { label: "Hex",   dims: ["AF","L"] },
 };
 
@@ -145,8 +145,8 @@ function normalizeStock(stock: Stock | null): Stock | null {
   if (s === "rect" || s === "round" || s === "hex") return stock;
   const d = stock.dims || {};
   if (s === "plate" || s === "block") return { shape: "rect",  dims: { L: d.L ?? 80, W: d.W ?? 50, H: d.H ?? 25 } };
-  if (s === "round-bar")               return { shape: "round", dims: { D: d.D ?? 30, L: d.L ?? 80, ID: 0 } };
-  if (s === "tube")                    return { shape: "round", dims: { D: d.OD ?? 30, L: d.L ?? 80, ID: d.ID ?? 0 } };
+  if (s === "round-bar")               return { shape: "round", dims: { D: d.D ?? 30, L: d.L ?? 80 } };
+  if (s === "tube")                    return { shape: "round", dims: { D: d.OD ?? d.D ?? 30, L: d.L ?? 80 } };
   if (s === "square-bar")              return { shape: "hex",   dims: { AF: d.side ?? 24, L: d.L ?? 80 } };
   return { shape: "rect", dims: { L: 80, W: 50, H: 25 } };
 }
@@ -240,7 +240,7 @@ function fmtStockDims(stock: Stock): string {
   const r = (n: number) => Math.round(n).toString();
   switch (stock.shape) {
     case "rect":  return `${r(d.L||0)}×${r(d.W||0)}×${r(d.H||0)} mm`;
-    case "round": return d.ID ? `⌀${r(d.D||0)}×${r(d.L||0)} mm · ID ${r(d.ID)}` : `⌀${r(d.D||0)}×${r(d.L||0)} mm`;
+    case "round": return `⌀${r(d.D||0)}×${r(d.L||0)} mm`;
     case "hex":   return `AF ${r(d.AF||0)}×${r(d.L||0)} mm`;
     default: return "";
   }
@@ -426,16 +426,12 @@ function buildQuotationData(args: {
   if (customerLines.length === 0) customerLines.push("—");
 
   // Page 2: per-part materials. Only included && non-purchased parts — a
-  // purchased part has no stock/material relationship to print. We strip the
-  // "· ID X" trailer that fmtStockDims appends for hollow round stock — the
-  // inner diameter is a manufacturing detail the customer doesn't need on the
-  // quotation, and it surprises users when it shows up unexpectedly (e.g.
-  // legacy parts migrated from the old "tube" shape carry an ID value).
+  // purchased part has no stock/material relationship to print.
   const partMaterials = included
     .filter(p => !MATERIALS[p.material]?.isPurchased)
     .map(p => {
       const matLabel = partMaterialLabel(p);
-      const dims = p.stock ? fmtStockDims(p.stock).replace(/\s*·\s*ID\s+\d+(?:\.\d+)?\s*$/i, "") : "—";
+      const dims = p.stock ? fmtStockDims(p.stock) : "—";
       return {
         partName: p.name,
         material: matLabel,
@@ -604,7 +600,7 @@ function StockPanel({ part, qty, onChange }: { part:Part; qty:number; onChange:(
 
   function updateShape(newShape: string) {
     const newCfg = SHAPES[newShape];
-    const defaults: Record<string, number> = { L: 80, W: 50, H: 25, D: 30, ID: 0, AF: 24 };
+    const defaults: Record<string, number> = { L: 80, W: 50, H: 25, D: 30, AF: 24 };
     const newDims: Record<string, number> = {};
     newCfg.dims.forEach(k => { newDims[k] = stock.dims?.[k] ?? defaults[k]; });
     // Shape changed → rates may differ per form, drop the override so the library rate kicks back in.

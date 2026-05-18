@@ -76,8 +76,7 @@ export function stockVolumeMm3(stock: Stock): number {
       return finite(dims.L) * finite(dims.W) * finite(dims.H);
     case "round": {
       const ro = finite(dims.D) / 2;
-      const ri = finite(dims.ID) / 2;
-      return Math.PI * (ro * ro - ri * ri) * finite(dims.L);
+      return Math.PI * ro * ro * finite(dims.L);
     }
     case "hex":
       return (Math.sqrt(3) / 2) * Math.pow(finite(dims.AF), 2) * finite(dims.L);
@@ -254,6 +253,5 @@ export function toQuoteCostSnapshot(rollup: QuoteRollup): QuoteCostSnapshot {
     computedAt: new Date().toISOString(),
   };
 }
-
 
 
