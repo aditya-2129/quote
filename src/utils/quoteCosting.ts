@@ -225,6 +225,32 @@ export function calculateQuoteRollup(
   };
 }
 
+export function calculateConfiguredQuoteRollup(
+  parts: Part[],
+  assemblyQuantity: number,
+  commercial: CommercialTerms,
+  materials: MaterialCatalog,
+  machines: MachineCatalog,
+  options: {
+    bops?: Array<{ qtyPerAssembly: number; unitCost: number }>;
+    extraCosts?: Array<{ amount: number }>;
+  } = {},
+): QuoteRollup {
+  const probe = calculateQuoteRollup(parts, assemblyQuantity, commercial, materials, machines, {
+    toolingCost: 0,
+    inspectionCost: 0,
+    bops: options.bops,
+    extraCosts: options.extraCosts,
+  });
+  if (probe.partsCost <= 0 && probe.bopCost <= 0) return probe;
+  return calculateQuoteRollup(parts, assemblyQuantity, commercial, materials, machines, {
+    toolingCost: 0,
+    inspectionCost: 0,
+    bops: options.bops,
+    extraCosts: options.extraCosts,
+  });
+}
+
 export function buildQuantityBreaks(
   parts: Part[],
   commercial: CommercialTerms,
@@ -253,5 +279,4 @@ export function toQuoteCostSnapshot(rollup: QuoteRollup): QuoteCostSnapshot {
     computedAt: new Date().toISOString(),
   };
 }
-
 

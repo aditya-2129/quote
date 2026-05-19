@@ -23,12 +23,15 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 ## Quote Flow
 
 - `src/context/QuoteStateContext.tsx` currently owns parts, BOP rows, selected part, assembly quantity, commercial inputs, and RFQ fields.
-- `src/pages/QuoteDetailPage.tsx` contains the main quote workspace composition and much of the current quote math.
+- `src/pages/QuoteDetailPage.tsx` is the quote route/layout orchestrator. It handles route loading, CAD handoff, preview collapse state, manual part creation, and composition of quote workspace sections.
+- `src/pages/QuoteDetail/` contains the quote workspace section components: parts table, stock panel, operations editor, RFQ rail, cost panel, BOP table, extra costs, and previews.
 - `src/components/QuotePreviewViewer.tsx` renders the compact on-demand Three.js preview in the quote page.
 - `src/components/BopModal.tsx` is the shared create/edit modal for catalog BOPs, reused by the BOP catalog page and quote BOP picker.
 - `src/pages/BopsPage.tsx` manages the reusable brought-out-parts catalog.
 - `src/utils/quoteTypes.ts` defines the current quote workspace `Part`, `Bop`, `Stock`, and `Op` types.
 - `src/utils/quoteCosting.ts` owns the active quote rollup used by the quote workspace and persistence. Fixed tooling/inspection charges and finishing cost are currently zeroed/excluded.
+- `src/context/CatalogContext.tsx` owns material/machine catalog loading and exposes costing catalogs plus display labels to quote workspace components.
+- `src/utils/pdfAssembly.ts` prepares quotation data for PDF rendering; `src/utils/fileSave.ts` owns platform-aware save/download behavior.
 - `src/utils/quote.ts` and `src/types/` still represent an older quote calculation model. Be careful when wiring new export or persistence behavior.
 
 ## Data Layer
@@ -54,6 +57,5 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 
 ## Known Debt
 
-- `QuoteDetailPage.tsx` is large and owns too many concerns: catalog loading, quote math, part table, RFQ rail, DFM panel, and cost panel.
 - Save/export paths need a bridge between current workspace types and the DB/export models.
 - Some docs and strings have mojibake from earlier encoding issues. Prefer ASCII in new docs unless a file already clearly uses UTF-8 correctly.

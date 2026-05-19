@@ -54,6 +54,8 @@ Thumbs.db
 .AppleDouble
 .LSOverride
 Icon?
+!src-tauri/icons/
+!src-tauri/icons/**
 .Spotlight-V100
 .Trashes
 .AppleDB
@@ -62,6 +64,8 @@ ehthumbs.db
 
 # IDE & Editor Addition
 .claude/
+.agents/
+skills-lock.json
 
 # Logs Addition
 errors.txt

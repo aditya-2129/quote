@@ -1,5 +1,5 @@
 export { ViewerPage } from "./ViewerPage";
-export { QuoteDetailPage } from "./QuoteDetailPage";
+export { QuoteDetailPage } from "./QuoteDetail";
 export { QuotesPage } from "./QuotesPage";
 export { CustomersPage } from "./CustomersPage";
 export { BopsPage } from "./BopsPage";

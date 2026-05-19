@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route, Navigate, Outlet, useParams } from "react-ro
 import { Layout } from "@components/Layout";
 import { AppUpdaterPrompt } from "@components/AppUpdaterPrompt";
 import { CadProvider } from "@context/CadContext";
+import { CatalogProvider } from "@context/CatalogContext";
 import { QuoteStateProvider } from "@context/QuoteStateContext";
 import {
   ViewerPage,
@@ -17,9 +18,11 @@ import {
 function QuoteLayout() {
   const { id } = useParams<{ id: string }>();
   return (
-    <QuoteStateProvider key={id}>
-      <Outlet />
-    </QuoteStateProvider>
+    <CatalogProvider>
+      <QuoteStateProvider key={id}>
+        <Outlet />
+      </QuoteStateProvider>
+    </CatalogProvider>
   );
 }
 
