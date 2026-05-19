@@ -6,7 +6,7 @@ import { useQuoteState } from "@context/QuoteStateContext";
 import { createCustomer, getAllCustomers, getCustomerById } from "../../db/queries";
 import type { Customer } from "../../db/schema";
 import { exportQuotationPdf } from "@utils/export";
-import { buildQuotationData, dataUrlToBytes, loadCompanyLogoBytes } from "@utils/pdfAssembly";
+import { buildQuotationData, dataUrlToBytes, loadQuotationSettings } from "@utils/pdfAssembly";
 import { downloadBytes } from "@utils/fileSave";
 import { fmtINR } from "@utils/format";
 import type { Bop, ExtraCost, Part } from "@utils/quoteTypes";
@@ -405,6 +405,7 @@ export const RfqRail = memo(function RfqRail({ parts, asmQty, setAsmQty, commerc
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<"inputs" | "notes">("inputs");
+  const [actionError, setActionError] = useState("");
 
   const r = calculateConfiguredQuoteRollup(
     parts, asmQty, commercial,
@@ -431,37 +432,41 @@ export const RfqRail = memo(function RfqRail({ parts, asmQty, setAsmQty, commerc
 
   async function handleSend() {
     if (!canSend) return;
+    setActionError("");
     try {
-      const quoteNumber = await sendQuote();
-      window.alert(`Quote sent as ${quoteNumber}.`);
+      await sendQuote();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Unable to send quote.");
+      setActionError(error instanceof Error ? error.message : "Unable to send quote.");
     }
   }
 
   async function handleExportPdf() {
     if (!canExport) {
-      window.alert("Add at least one included part before exporting a PDF.");
+      setActionError("Add at least one included part before exporting a PDF.");
       return;
     }
+    setActionError("");
     try {
       await catalog.refreshCatalog();
-      const [logoBytes, cadSnapshotPng, customerRecord] = await Promise.all([
-        loadCompanyLogoBytes(),
+      const [quotationSettings, cadSnapshotPng, customerRecord] = await Promise.all([
+        loadQuotationSettings(),
         Promise.resolve(dataUrlToBytes(getCadSnapshot?.() ?? null)),
         rfq.customerId ? getCustomerById(rfq.customerId).catch(() => null) : Promise.resolve(null),
       ]);
       const data = buildQuotationData({
         rfq, parts, bops, extraCosts, asmQty, commercial,
-        quoteNumber, catalog, customerRecord,
+        quoteNumber, catalog, customerRecord, quotationSettings,
       });
       const pdf = await exportQuotationPdf({
-        ...data, logoBytes, logoMime: "image/jpeg", cadSnapshotPng,
+        ...data,
+        logoBytes: quotationSettings.logoBytes,
+        logoMime: quotationSettings.logoMime,
+        cadSnapshotPng,
       });
       if (!pdf.ok) throw new Error(pdf.reason);
       await downloadBytes(pdf.fileName, pdf.bytes, pdf.mimeType);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Unable to export PDF.");
+      setActionError(error instanceof Error ? error.message : "Unable to export PDF.");
     }
   }
 
@@ -577,6 +582,26 @@ export const RfqRail = memo(function RfqRail({ parts, asmQty, setAsmQty, commerc
           </button>
         </div>
       </div>
+      {actionError && createPortal(
+        <div className="modal-overlay action-error-overlay">
+          <div className="action-error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="quote-action-error-title">
+            <div className="action-error-head">
+              <div className="confirm-icon"><TriangleAlert size={20} /></div>
+              <div>
+                <h2 id="quote-action-error-title">Action blocked</h2>
+                <p>{actionError}</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setActionError("")} title="Close">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="action-error-actions">
+              <button type="button" className="btn primary sm" onClick={() => setActionError("")}>OK</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 });

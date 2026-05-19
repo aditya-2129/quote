@@ -1,4 +1,6 @@
 import type {
+  AppSetting,
+  AppSettingKey,
   BopCatalogItem,
   Customer,
   Machine,
@@ -31,6 +33,7 @@ import type {
 } from "./schema";
 
 type BrowserDb = {
+  appSettings: AppSetting[];
   bopCatalog: BopCatalogItem[];
   customers: Customer[];
   machines: Machine[];
@@ -63,6 +66,7 @@ const now = () => new Date();
 const seedDate = new Date("2026-05-16T00:00:00.000Z");
 
 const initialDb: BrowserDb = {
+  appSettings: [],
   materials: [
     { id: "mat-ms", name: "Mild Steel (MS)", densityKgPerM3: 7850, costPerKg: 75, currency: "INR", markupPercent: 15, category: "Metal", availableForms: ["rect", "round", "hex"], formRates: { rect: 75, round: 80, hex: 85 }, notes: null, isActive: true, isSystem: true, createdAt: seedDate, updatedAt: seedDate },
     { id: "mat-al6061", name: "Aluminum 6061-T6", densityKgPerM3: 2700, costPerKg: 280, currency: "INR", markupPercent: 15, category: "Metal", availableForms: ["rect", "round"], formRates: { rect: 280, round: 290 }, notes: null, isActive: true, isSystem: true, createdAt: seedDate, updatedAt: seedDate },
@@ -201,6 +205,33 @@ function deletePartsForQuoteRows(db: BrowserDb, quoteId: string): void {
 }
 
 export const browserDb = {
+  getSetting(key: AppSettingKey): unknown | null {
+    return readDb().appSettings.find(row => row.key === key)?.value ?? null;
+  },
+  getAllSettings(): Record<AppSettingKey, unknown> {
+    const rows = readDb().appSettings;
+    return Object.fromEntries(rows.map(row => [row.key, row.value])) as Record<AppSettingKey, unknown>;
+  },
+  setSetting(key: AppSettingKey, value: unknown): AppSetting {
+    const db = readDb();
+    const existing = db.appSettings.find(row => row.key === key);
+    const updatedAt = now();
+    if (existing) {
+      existing.value = value;
+      existing.updatedAt = updatedAt;
+      writeDb(db);
+      return existing;
+    }
+    const row: AppSetting = { key, value, updatedAt };
+    db.appSettings.push(row);
+    writeDb(db);
+    return row;
+  },
+  deleteSetting(key: AppSettingKey): void {
+    const db = readDb();
+    db.appSettings = db.appSettings.filter(row => row.key !== key);
+    writeDb(db);
+  },
   getAllMachines(activeOnly = true): Machine[] {
     const rows = readDb().machines;
     return rows.filter(row => !activeOnly || row.isActive).sort(byName);
@@ -727,6 +758,5 @@ export const browserDb = {
     writeDb(db);
   },
 };
-
 
 

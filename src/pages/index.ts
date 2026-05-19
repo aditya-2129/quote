@@ -6,3 +6,4 @@ export { BopsPage } from "./BopsPage";
 export { AnalyticsPage } from "./AnalyticsPage";
 export { MaterialsPage } from "./MaterialsPage";
 export { MachinesPage } from "./MachinesPage";
+export { SettingsPage } from "./SettingsPage";

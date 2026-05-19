@@ -1,46 +1,131 @@
 import type { CatalogContextValue } from "@context/CatalogContext";
 import type { Customer } from "../db/schema";
+import { getAllSettings } from "../db/queries";
 import { calculateConfiguredQuoteRollup, effectivePartRate, operationCost as calculateOperationCost, operationRate as calculateOperationRate, partMaterialCost as calculatePartMaterialCost, partQuantity } from "./quoteCosting";
 import { fmtStockDims } from "./stock";
 import type { Bop, ExtraCost, Part } from "./quoteTypes";
 import type { QuotationData, QuotationLineItem } from "./export";
-import pacificIndiaLogoUrl from "../assets/pacific-india-logo.jpg";
+import { isTauriRuntime } from "./tauriRuntime";
 
-export const COMPANY_INFO = {
-  name: "PACIFIC INDIA VENTURE",
-  addressLines: ["Tapkir Plaza, Nigdi, PCMC, Pune 411044"] as string[],
-  phone: "9527352858",
-  email: "pacificindia.pcmcpune@gmail.com",
-  gstn: "27AAKPF1080D1Z4",
-  state: "Maharashtra",
-  stateCode: "27",
-  tagline: "Manufacturing & Supply of SPM, Precision Tools, Die & Components",
-  contactPerson: "N. CHANDRA",
-  contactPhone: "9527352858",
-  contactEmail: "pacificindia.pcmcpune@gmail.com",
-} as const;
+export type QuotationSettings = {
+  company: QuotationData["company"];
+  contact: QuotationData["contact"];
+  currencyLabel: string;
+  terms: string[];
+  logoBytes: Uint8Array | null;
+  logoMime: "image/jpeg" | "image/png";
+};
 
-export const QUOTATION_TERMS = [
-  "E. & O.E.",
-  "Delivery Period: As mention on PO from the order date and advance.",
-  "Payment Terms: As mutually agreed and finalized with the company.",
-  "Taxes & Duties: GST @ 18% extra as applicable.",
-  "Freight: Charged extra at actuals.",
-];
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
 
-let _logoBytesCache: Uint8Array | null = null;
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n|,/)
+    .map(line => line.trim())
+    .filter(Boolean);
+}
 
-export async function loadCompanyLogoBytes(): Promise<Uint8Array | null> {
-  if (_logoBytesCache) return _logoBytesCache;
-  try {
-    const response = await fetch(pacificIndiaLogoUrl);
-    if (!response.ok) return null;
-    const buffer = await response.arrayBuffer();
-    _logoBytesCache = new Uint8Array(buffer);
-    return _logoBytesCache;
-  } catch {
-    return null;
+function splitTerms(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function inferLogoMime(path: string): "image/jpeg" | "image/png" {
+  return path.trim().toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+}
+
+async function loadLogoBytes(path: string): Promise<Uint8Array | null> {
+  const cleaned = path.trim();
+  if (!cleaned) return null;
+
+  if (cleaned.startsWith("data:")) return dataUrlToBytes(cleaned);
+
+  if (/^https?:\/\//i.test(cleaned) || cleaned.startsWith("/")) {
+    try {
+      const response = await fetch(cleaned);
+      if (!response.ok) return null;
+      return new Uint8Array(await response.arrayBuffer());
+    } catch {
+      return null;
+    }
   }
+
+  if (isTauriRuntime()) {
+    try {
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      return await readFile(cleaned);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+export async function loadQuotationSettings(): Promise<QuotationSettings> {
+  const settings = await getAllSettings();
+  const companyName = asString(settings.company_name);
+  const companyAddress = asString(settings.company_address);
+  const companyPhone = asString(settings.company_phone);
+  const companyEmail = asString(settings.company_email);
+  const companyGstn = asString(settings.company_gstn);
+  const companyState = asString(settings.company_state);
+  const companyStateCode = asString(settings.company_state_code);
+  const companyTagline = asString(settings.company_tagline);
+  const contactPerson = asString(settings.company_contact_person);
+  const contactPhone = asString(settings.company_contact_phone);
+  const contactEmail = asString(settings.company_contact_email);
+  const currencyLabel = asString(settings.currency);
+  const quoteTerms = asString(settings.quote_terms);
+
+  const missing = [
+    [companyName, "company name"],
+    [companyAddress, "company address"],
+    [companyPhone, "company phone"],
+    [companyEmail, "company email"],
+    [companyGstn, "GSTN"],
+    [companyState, "state"],
+    [companyStateCode, "state code"],
+    [companyTagline, "tagline"],
+    [contactPerson, "contact person"],
+    [contactPhone, "contact phone"],
+    [contactEmail, "contact email"],
+    [currencyLabel, "currency"],
+    [quoteTerms, "PDF terms"],
+  ]
+    .filter(([value]) => !value)
+    .map(([, label]) => label);
+
+  if (missing.length > 0) {
+    throw new Error(`Complete Settings before exporting: ${missing.join(", ")}.`);
+  }
+
+  const logoPath = asString(settings.company_logo_path);
+  return {
+    company: {
+      name: companyName,
+      addressLines: splitLines(companyAddress),
+      phone: companyPhone,
+      email: companyEmail,
+      gstn: companyGstn,
+      state: companyState,
+      stateCode: companyStateCode,
+      tagline: companyTagline,
+    },
+    contact: {
+      name: contactPerson,
+      phone: contactPhone,
+      email: contactEmail,
+    },
+    currencyLabel,
+    terms: splitTerms(quoteTerms),
+    logoBytes: await loadLogoBytes(logoPath),
+    logoMime: inferLogoMime(logoPath),
+  };
 }
 
 export function dataUrlToBytes(dataUrl: string | null): Uint8Array | null {
@@ -73,6 +158,7 @@ export function buildQuotationData(args: {
   quoteNumber: string | null;
   catalog: CatalogContextValue;
   customerRecord?: Customer | null;
+  quotationSettings: QuotationSettings;
 }): QuotationData {
   const included = args.parts.filter(p => p.included);
   const { materials, materialCosts, machineCosts, partMaterialLabel, opMachineLabel } = args.catalog;
@@ -140,23 +226,23 @@ export function buildQuotationData(args: {
 
   return {
     company: {
-      name: COMPANY_INFO.name,
-      addressLines: COMPANY_INFO.addressLines,
-      phone: COMPANY_INFO.phone,
-      email: COMPANY_INFO.email,
-      gstn: COMPANY_INFO.gstn,
-      state: COMPANY_INFO.state,
-      stateCode: COMPANY_INFO.stateCode,
-      tagline: COMPANY_INFO.tagline,
+      name: args.quotationSettings.company.name,
+      addressLines: args.quotationSettings.company.addressLines,
+      phone: args.quotationSettings.company.phone,
+      email: args.quotationSettings.company.email,
+      gstn: args.quotationSettings.company.gstn,
+      state: args.quotationSettings.company.state,
+      stateCode: args.quotationSettings.company.stateCode,
+      tagline: args.quotationSettings.company.tagline,
     },
     customer: { name: customerName, addressLines: customerLines },
     meta: { srNo: refLabel, date: fmtQuotationDate(new Date()), refNo: args.rfq.rfqRef, validFor: "15 DAYS" },
     items,
     grandTotal,
-    currencyLabel: "INR",
+    currencyLabel: args.quotationSettings.currencyLabel,
     notes: args.rfq.notes,
-    terms: QUOTATION_TERMS,
-    contact: { name: COMPANY_INFO.contactPerson, phone: COMPANY_INFO.contactPhone, email: COMPANY_INFO.contactEmail },
+    terms: args.quotationSettings.terms,
+    contact: args.quotationSettings.contact,
     fileName: `${refLabel || "quotation"}.pdf`,
     partMaterials,
     partOperationGroups,

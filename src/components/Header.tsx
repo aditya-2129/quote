@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
-import { Search, Bell, Minimize2, Maximize2, Minus, X, Command } from "lucide-react";
+import { Search, Bell, Minimize2, Maximize2, Minus, X, Command, Settings } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { KbdOverlay } from "./KbdOverlay";
 import brandLogo from "../assets/quote-logo.svg";
 
 export function Header() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const settingsActive = location.pathname === "/settings";
 
   useEffect(() => {
     async function check() {
@@ -85,6 +89,15 @@ export function Header() {
           <button className="icon-btn">
             <Bell size={15} />
             <span className="dot" />
+          </button>
+          <button
+            className={`icon-btn ${settingsActive ? "active" : ""}`}
+            onClick={() => navigate("/settings")}
+            title="Settings"
+            aria-label="Settings"
+            aria-current={settingsActive ? "page" : undefined}
+          >
+            <Settings size={15} />
           </button>
         </div>
 

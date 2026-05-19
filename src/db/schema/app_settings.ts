@@ -11,8 +11,18 @@ export type AppSettingKey =
   | "default_tax_pct"     // number
   | "company_name"        // string
   | "company_address"     // string
+  | "company_phone"       // string
+  | "company_email"       // string
+  | "company_gstn"        // string
+  | "company_state"       // string
+  | "company_state_code"  // string
+  | "company_tagline"     // string
+  | "company_contact_person" // string
+  | "company_contact_phone"  // string
+  | "company_contact_email"  // string
   | "company_logo_path"   // string (file path)
   | "quote_notes_default" // string
+  | "quote_terms"         // string, one term per line
   | "recent_files_limit"; // number
 
 export const appSettings = sqliteTable("app_settings", {

@@ -13,6 +13,7 @@ import {
   AnalyticsPage,
   MaterialsPage,
   MachinesPage,
+  SettingsPage,
 } from "@pages/index";
 
 function QuoteLayout() {
@@ -44,6 +45,7 @@ function App() {
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/materials" element={<MaterialsPage />} />
           <Route path="/machines" element={<MachinesPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </HashRouter>
