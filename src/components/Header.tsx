@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Search, Bell, Minimize2, Maximize2, Minus, X, Command } from "lucide-react";
 import { KbdOverlay } from "./KbdOverlay";
-import brandLogo from "../assets/image.png";
+import brandLogo from "../assets/quote-logo.svg";
 
 export function Header() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -67,7 +67,7 @@ export function Header() {
     <>
       <header className="topbar" data-tauri-drag-region>
         <div className="hd-brand">
-          <img className="brand-logo" src={brandLogo} alt="Pacific India Venture" />
+          <img className="brand-logo" src={brandLogo} alt="Quote" />
         </div>
 
         <div className="topbar-divider" />
