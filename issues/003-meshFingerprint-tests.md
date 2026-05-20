@@ -1,7 +1,8 @@
 # 003 — Golden tests for meshFingerprint duplicate grouping
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 8d3658f
 
 ## What to build
 
@@ -11,11 +12,11 @@ Reuse `importStepBytes` from `src/utils/cad.ts` and `groupIdenticalMeshes` from 
 
 ## Acceptance criteria
 
-- [ ] Every fixture covered by at least one assertion
-- [ ] Mirrored instances grouped together
-- [ ] Rotated instances grouped together
-- [ ] Near-duplicate but distinct bodies NOT grouped together
-- [ ] Tests run in CI in under 60s on the full fixture suite
+- [x] Every fixture covered by at least one assertion
+- [x] Mirrored instances grouped together
+- [x] Rotated instances grouped together
+- [x] Near-duplicate but distinct bodies NOT grouped together
+- [x] Tests run in CI in under 60s on the full fixture suite
 
 ## Blocked by
 
