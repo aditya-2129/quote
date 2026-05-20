@@ -1,7 +1,8 @@
 # 008 — Add ErrorBoundary at app root
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: a123b03
 
 ## What to build
 
@@ -9,11 +10,11 @@ Add a React `ErrorBoundary` wrapping the app shell in `src/App.tsx`. On error, s
 
 ## Acceptance criteria
 
-- [ ] Thrown errors in any route surface the fallback UI instead of a blank screen
-- [ ] Reload button restores the app cleanly
-- [ ] Copy diagnostic action puts a structured JSON blob on clipboard
-- [ ] Error logged via `tauri-plugin-log` if available
-- [ ] Manual test: throw error in a route → fallback appears
+- [x] Thrown errors in any route surface the fallback UI instead of a blank screen
+- [x] Reload button restores the app cleanly
+- [x] Copy diagnostic action puts a structured JSON blob on clipboard
+- [x] Error logged via `tauri-plugin-log` if available
+- [x] Manual test: throw error in a route → fallback appears
 
 ## Blocked by
 
