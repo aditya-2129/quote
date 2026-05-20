@@ -28,6 +28,7 @@ Local issue tracker for the roadmap in `plans/enterprise-cad-roadmap.md`.
 | Issue | Commit | Notes |
 |---|---|---|
 | 001 | c9d116b | Vitest setup, alias sanity tests, lint baseline cleaned |
+| 002 | daa209c | STEP fixture suite with 25 curated fixtures, expected metadata, provenance, and visual review |
 
 ## Suggested execution order
 

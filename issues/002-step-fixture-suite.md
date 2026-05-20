@@ -1,7 +1,8 @@
 # 002 — Build STEP fixture suite
 
 **Type:** HITL
-Status: ready-for-human
+Status: done
+Completed in: daa209c
 
 ## What to build
 
@@ -23,11 +24,11 @@ HITL: sourcing real-world STEP files requires manual collection and ground-truth
 
 ## Acceptance criteria
 
-- [ ] At least 15 fixtures present in `tests/fixtures/step/`
-- [ ] Each fixture has a sibling `.expected.json` with manually verified ground truth
-- [ ] `README.md` in fixtures dir documents each fixture's purpose
-- [ ] No fixture exceeds 10 MB (commit-friendly)
-- [ ] License/provenance recorded for each non-self-authored file
+- [x] At least 15 fixtures present in `tests/fixtures/step/`
+- [x] Each fixture has a sibling `.expected.json` with manually verified ground truth
+- [x] `README.md` in fixtures dir documents each fixture's purpose
+- [x] No fixture exceeds 10 MB (commit-friendly)
+- [x] License/provenance recorded for each non-self-authored file
 
 ## Blocked by
 
