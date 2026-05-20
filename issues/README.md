@@ -2,7 +2,11 @@
 
 Local issue tracker for the roadmap in `plans/enterprise-cad-roadmap.md`.
 
-50 vertical-slice issues, ordered by dependency. Each file is one issue.
+44 vertical-slice issues, ordered by dependency. Each file is one issue.
+
+**Scope reminder:** this is a single-user, locally-installed Tauri desktop app. No web build, no SaaS, no multi-user server, no shared backend. Every issue must run inside one user's Tauri process with local SQLite + local filesystem only. Anything implying a remote service, multi-tenant model, or browser deployment is out of scope by default.
+
+AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and is intentionally out of scope here — the moat is deterministic geometric intelligence first.
 
 ## Phase index
 
@@ -16,12 +20,11 @@ Local issue tracker for the roadmap in `plans/enterprise-cad-roadmap.md`.
 | 5 | 036–038 | PMI / tolerance / surface finish extraction and costing |
 | 6 | 039–041 | Historical job data + similarity index + calibration dashboard |
 | 7 | 042–044 | Multi-format CAD support |
-| 8 | 045–050 | AI layer (LAST, never first) |
 
 ## HITL vs AFK summary
 
-**HITL (13):** 002, 007, 009, 015, 031, 032, 033, 034, 044, 045, 046, 049, 050
-**AFK (37):** everything else
+**HITL (9):** 002, 007, 009, 015, 031, 032, 033, 034, 044
+**AFK (35):** everything else
 
 ## Completed
 
@@ -41,7 +44,7 @@ Phase 1 fully before Phase 2.
 Phase 2 spike (#015) before any other Phase 2 work.
 Phases 3 and 5 can partially parallelize after Phase 2 lands.
 Phase 4 needs domain expert availability (HITL-heavy).
-Phase 8 strictly last — AI without deterministic intelligence underneath is a demo.
+AI is tracked in a separate plan and never enters before the deterministic intelligence in Phases 0–7 lands.
 
 ## Total estimated effort
 

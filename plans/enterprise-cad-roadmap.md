@@ -2,11 +2,13 @@
 
 ## Context
 
+**Scope reminder:** This is a single-user, locally-installed Tauri desktop app. No web build, no SaaS, no multi-user server, no shared backend. Every feature in this roadmap must run inside one user's Tauri process with local SQLite + local filesystem only. Anything implying a remote service, multi-tenant data model, or browser deployment is out of scope by default and must be re-justified before entering the plan.
+
 The app is currently a strong prototype of a desktop quoting tool: Tauri 2 + React 19, `occt-import-js` for STEP tessellation, mesh-based duplicate grouping, heuristic shape classification, deterministic quote costing. The current geometry layer is unusually solid for a solo build (the radial-signature fingerprinting in `src/utils/meshFingerprint.ts` is genuinely good engineering).
 
 But the system has a hard ceiling: **it operates on triangles, not BREP topology**. Without analytic surface/face access, the app cannot reliably do feature recognition, accessibility analysis, tolerance-aware costing, or any of the things that separate a quoting prototype from an enterprise manufacturing intelligence platform.
 
-This document is the long-term roadmap to close that gap, ordered by dependency. **AI is intentionally last** — the moat is deterministic geometric intelligence; AI on top of that is multiplicative, AI without it is a demo.
+This document is the long-term roadmap to close that gap, ordered by dependency. The moat is deterministic geometric intelligence; AI on top of that is multiplicative, AI without it is a demo — so AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and is intentionally out of scope here.
 
 Current realistic position: ~15–25% toward enterprise-grade. The architecture direction is correct; the missing pieces are scope, not redesign.
 
@@ -236,26 +238,6 @@ Currently STEP-only. Enterprise customers send anything.
 
 ---
 
-## Phase 8 — THEN AI
-
-Only after Phase 0–7 does AI multiply value instead of substituting for missing intelligence.
-
-| AI use case | Value | Notes |
-|-------------|-------|-------|
-| RFQ email parsing | Medium | LLM extracts part name, qty, material from customer email |
-| Quote explanation to customer | High | LLM narrates the deterministic costing breakdown |
-| Geometry similarity search | Very high | Combine Phase 6 vector index with LLM reranking |
-| DFM suggestion narrative | High | Deterministic engine finds issues, LLM writes the email |
-| Estimator copilot | Very high | LLM proposes adjustments, deterministic engine validates |
-| Vendor recommendation | Medium | Match customer requirements to shop capabilities |
-
-**Anti-patterns to avoid even at this stage:**
-- LLM doing costing math
-- LLM hallucinating features without topology backing
-- Agentic loops over quote generation (deterministic chain wins)
-
----
-
 ## Critical Files to Modify (master reference)
 
 ### Phase 0
@@ -300,9 +282,6 @@ Only after Phase 0–7 does AI multiply value instead of substituting for missin
 ### Phase 7
 - `src-tauri/src/cad/import.rs` (multi-format)
 
-### Phase 8
-- new: `src/ai/*` (last, never first)
-
 ---
 
 ## Verification Strategy
@@ -344,9 +323,6 @@ Each phase gets its own verification gate. Do not advance to phase N+1 until pha
 
 ### Phase 7 verification
 - Same fixture suite runs across all supported formats with consistent feature output
-
-### Phase 8 verification
-- Per AI use case: deterministic engine output is unchanged; AI only annotates/narrates/searches
 
 ---
 
