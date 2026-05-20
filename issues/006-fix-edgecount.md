@@ -1,7 +1,8 @@
 # 006 — Fix fabricated edgeCount field
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 532cbaa
 
 ## What to build
 
@@ -14,11 +15,11 @@ Audit must cover: `src/utils/quoteCosting.ts`, `src/utils/pdfAssembly.ts`, `src/
 
 ## Acceptance criteria
 
-- [ ] Audit report committed (which consumers use the field)
-- [ ] Either field removed OR replaced with real computation
-- [ ] No remaining `* 1.5` magic number in cad.ts
-- [ ] Existing tests pass (or are updated to reflect the new value)
-- [ ] PDF export and UI rendering unchanged unless the field is consumer-facing
+- [x] Audit report committed (which consumers use the field) — see commit message
+- [x] Either field removed OR replaced with real computation (removed; no consumer needed it)
+- [x] No remaining `* 1.5` magic number in cad.ts
+- [x] Existing tests pass (or are updated to reflect the new value) — 155/155 still pass, no test touched the field
+- [x] PDF export and UI rendering unchanged unless the field is consumer-facing — no UI or PDF site read it
 
 ## Blocked by
 
