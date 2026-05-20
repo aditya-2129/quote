@@ -17,14 +17,26 @@ Recommended conventions:
 
 ## Drafting Work Locally
 
-For early planning or offline work, use local markdown under `.scratch/`:
+Use local markdown when planning is not ready to publish to GitHub Issues yet.
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- PRD: `.scratch/<feature-slug>/PRD.md`
-- Issues: `.scratch/<feature-slug>/issues/<NN>-<slug>.md`
+For active roadmap-level work, use the top-level planning folders:
+
+- Plans: `plans/<roadmap-or-feature>.md`
+- Issues: `issues/<NNN>-<slug>.md`
+- Index: `issues/README.md`
 - Triage state: a `Status:` line near the top of each issue file
 
+For scratch experiments that are not part of the active roadmap, use `.scratch/<feature-slug>/`.
+
 Local drafts can later be copied into GitHub Issues.
+
+## Current Local Roadmap
+
+The enterprise CAD intelligence roadmap is tracked locally until it is ready to publish:
+
+- Plan: `plans/enterprise-cad-roadmap.md`
+- Local issue index: `issues/README.md`
+- Issue status mapping: `AFK` -> `ready-for-agent`, `HITL` -> `ready-for-human`
 
 ## Fetching Work
 

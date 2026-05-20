@@ -173,6 +173,12 @@ For deeper project context, see:
 - [`docs/agents/`](docs/agents/) for issue-tracker, triage, and agent workflow setup.
 - [`docs/adr/`](docs/adr/) for architectural decisions.
 
+### Roadmap and local issues
+
+- [`plans/enterprise-cad-roadmap.md`](plans/enterprise-cad-roadmap.md) tracks the long-term path to enterprise-grade CAD intelligence.
+- [`issues/README.md`](issues/README.md) indexes the local roadmap issues.
+- Local issue statuses use `ready-for-agent` for AFK implementation work and `ready-for-human` for HITL decision/review work.
+
 ---
 
 ## Status
