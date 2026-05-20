@@ -1,0 +1,48 @@
+{
+  "fixture": "cadclaw_l2_good.step",
+  "purpose": "CADCLAW generated motor mount assembly containing a drilled mount plate and repeated wheels.",
+  "categories": [
+    "bracket with multiple holes",
+    "assembly",
+    "duplicate grouping"
+  ],
+  "source": {
+    "kind": "generated-from-open-source",
+    "name": "CADCLAW L2_good",
+    "url": "https://github.com/sunnyday-technologies/CADCLAW/blob/main/tests/generate_fixtures.py",
+    "license": "MIT"
+  },
+  "file": {
+    "sizeBytes": 128793,
+    "sha256": "b718fc39da6d958052042cba882abd469ff839ea649503a30c6abb31d8004a2f"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 10,
+    "duplicateGroupCount": 6,
+    "duplicateGroupSizes": [
+      4,
+      2,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "motor-mount-assembly",
+    "holeCount": 5,
+    "boundingBoxMm": {
+      "x": 80,
+      "y": 118.2,
+      "z": 1098.3
+    },
+    "volumeMm3": 3821769.687,
+    "surfaceAreaMm2": 332312.043,
+    "triangleCount": 660,
+    "vertexCount": 770
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

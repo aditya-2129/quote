@@ -1,0 +1,48 @@
+{
+  "fixture": "cadclaw_l2_bad.step",
+  "purpose": "CADCLAW generated motor mount assembly with an extra repeated wheel for inventory/duplicate drift coverage.",
+  "categories": [
+    "assembly",
+    "duplicate grouping",
+    "pathological geometry"
+  ],
+  "source": {
+    "kind": "generated-from-open-source",
+    "name": "CADCLAW L2_bad",
+    "url": "https://github.com/sunnyday-technologies/CADCLAW/blob/main/tests/generate_fixtures.py",
+    "license": "MIT"
+  },
+  "file": {
+    "sizeBytes": 145642,
+    "sha256": "59b8db417af3575f3ab2805298f4565bf18d886588fc30528c9bc958c22ec034"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 11,
+    "duplicateGroupCount": 6,
+    "duplicateGroupSizes": [
+      5,
+      2,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "motor-mount-assembly",
+    "holeCount": 5,
+    "boundingBoxMm": {
+      "x": 80,
+      "y": 118.2,
+      "z": 1098.3
+    },
+    "volumeMm3": 3827596.029,
+    "surfaceAreaMm2": 334429.583,
+    "triangleCount": 672,
+    "vertexCount": 794
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

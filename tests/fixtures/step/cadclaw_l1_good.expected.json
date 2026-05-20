@@ -1,0 +1,45 @@
+{
+  "fixture": "cadclaw_l1_good.step",
+  "purpose": "CADCLAW generated clean bracket assembly with two beams, plates, and connector.",
+  "categories": [
+    "assembly",
+    "simple bracket",
+    "inventory baseline"
+  ],
+  "source": {
+    "kind": "generated-from-open-source",
+    "name": "CADCLAW L1_good",
+    "url": "https://github.com/sunnyday-technologies/CADCLAW/blob/main/tests/generate_fixtures.py",
+    "license": "MIT"
+  },
+  "file": {
+    "sizeBytes": 67054,
+    "sha256": "08848de0def49e957f03915c7b4804f6483c920a06cdd485ee97621e16dec785"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 5,
+    "duplicateGroupCount": 3,
+    "duplicateGroupSizes": [
+      2,
+      2,
+      1
+    ],
+    "dominantShape": "bracket-assembly",
+    "holeCount": 0,
+    "boundingBoxMm": {
+      "x": 590,
+      "y": 280,
+      "z": 710
+    },
+    "volumeMm3": 3272000,
+    "surfaceAreaMm2": 284000,
+    "triangleCount": 60,
+    "vertexCount": 120
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "fixture": "local_ps_220129_single_cavity_transfer_tool.stp",
+  "purpose": "User-supplied local single-cavity transfer tool fixture for complex tool assembly coverage.",
+  "categories": [
+    "complex transfer tool",
+    "tooling assembly",
+    "existing local CAD"
+  ],
+  "source": {
+    "kind": "user-supplied-local-fixture",
+    "name": "PS_220129_SINGLE CAV. TRANSFER TOOL (1).stp",
+    "url": "C:/Users/aditya/Downloads/PS_220129_SINGLE CAV. TRANSFER TOOL (1).stp",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 163973,
+    "sha256": "2680f0631482b45aaeccb605d669dbc8b6652763bf9ce85cac70c12381c5cf29"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 6,
+    "duplicateGroupCount": 6,
+    "duplicateGroupSizes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "transfer-tool-assembly",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 100,
+      "y": 100,
+      "z": 126.07
+    },
+    "volumeMm3": 974506.531,
+    "surfaceAreaMm2": 129976.1,
+    "triangleCount": 27139,
+    "vertexCount": 19453
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

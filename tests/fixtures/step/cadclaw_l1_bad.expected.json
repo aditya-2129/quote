@@ -1,0 +1,45 @@
+{
+  "fixture": "cadclaw_l1_bad.step",
+  "purpose": "CADCLAW generated bracket assembly with deliberate clipping/missing-part error for negative-case coverage.",
+  "categories": [
+    "assembly",
+    "pathological geometry",
+    "interference case"
+  ],
+  "source": {
+    "kind": "generated-from-open-source",
+    "name": "CADCLAW L1_bad",
+    "url": "https://github.com/sunnyday-technologies/CADCLAW/blob/main/tests/generate_fixtures.py",
+    "license": "MIT"
+  },
+  "file": {
+    "sizeBytes": 67064,
+    "sha256": "82d1a2d2d1cfc956215e2e506d85034ff9b25ee88619f3195a34bc2cb3915197"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 5,
+    "duplicateGroupCount": 3,
+    "duplicateGroupSizes": [
+      2,
+      2,
+      1
+    ],
+    "dominantShape": "bracket-assembly",
+    "holeCount": 0,
+    "boundingBoxMm": {
+      "x": 582.5,
+      "y": 80,
+      "z": 520
+    },
+    "volumeMm3": 3272000,
+    "surfaceAreaMm2": 284000,
+    "triangleCount": 60,
+    "vertexCount": 120
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

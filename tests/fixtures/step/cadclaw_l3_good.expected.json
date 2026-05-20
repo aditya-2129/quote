@@ -1,0 +1,51 @@
+{
+  "fixture": "cadclaw_l3_good.step",
+  "purpose": "CADCLAW generated larger gantry-corner assembly for multi-body import and grouping coverage.",
+  "categories": [
+    "assembly",
+    "rotated duplicates",
+    "large fixture"
+  ],
+  "source": {
+    "kind": "generated-from-open-source",
+    "name": "CADCLAW L3_good",
+    "url": "https://github.com/sunnyday-technologies/CADCLAW/blob/main/tests/generate_fixtures.py",
+    "license": "MIT"
+  },
+  "file": {
+    "sizeBytes": 188141,
+    "sha256": "b2996ffc6893d4c3e10aeec536803c03f32733a120fc269f3658a6a71d9b69ae"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 18,
+    "duplicateGroupCount": 9,
+    "duplicateGroupSizes": [
+      6,
+      3,
+      2,
+      2,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "gantry-corner-assembly",
+    "holeCount": 0,
+    "boundingBoxMm": {
+      "x": 590,
+      "y": 710,
+      "z": 1274.5
+    },
+    "volumeMm3": 7121650.588,
+    "surfaceAreaMm2": 645968.12,
+    "triangleCount": 216,
+    "vertexCount": 432
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

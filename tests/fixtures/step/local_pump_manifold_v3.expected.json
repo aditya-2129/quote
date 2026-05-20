@@ -1,0 +1,43 @@
+{
+  "fixture": "local_pump_manifold_v3.step",
+  "purpose": "Existing local pump manifold fixture; compact single-part manifold with pockets and ports.",
+  "categories": [
+    "deep pocket",
+    "simple machined part",
+    "existing local CAD"
+  ],
+  "source": {
+    "kind": "existing-local-fixture",
+    "name": "Pump Manifold v3.step",
+    "url": "public/test_files/Pump Manifold v3.step",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 504693,
+    "sha256": "8596ec93c6b3fa01e907806204e8f30e1c0e4210988a5b86e237c7ac667edac6"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 1,
+    "duplicateGroupCount": 1,
+    "duplicateGroupSizes": [
+      1
+    ],
+    "dominantShape": "rectangular-machined",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 114.3,
+      "y": 114.197,
+      "z": 83.185
+    },
+    "volumeMm3": 276531.805,
+    "surfaceAreaMm2": 42215.048,
+    "triangleCount": 4300,
+    "vertexCount": 4127
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

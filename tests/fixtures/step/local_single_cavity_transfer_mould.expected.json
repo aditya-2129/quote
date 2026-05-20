@@ -1,0 +1,51 @@
+{
+  "fixture": "local_single_cavity_transfer_mould.stp",
+  "purpose": "Existing local transfer mould fixture with complex mould geometry.",
+  "categories": [
+    "complex mould",
+    "pocketed part",
+    "existing local CAD"
+  ],
+  "source": {
+    "kind": "existing-local-fixture",
+    "name": "PS_8671_SINGLE CAVITY TRANSFER MOULD.stp",
+    "url": "public/test_files/PS_8671_SINGLE CAVITY TRANSFER MOULD.stp",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 2633173,
+    "sha256": "2490cc29a7eeeeee5e636835a0ad4f4d6dffa54db70597bec115c88184b9a9f5"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 9,
+    "duplicateGroupCount": 9,
+    "duplicateGroupSizes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "mould-assembly",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 150,
+      "y": 225.55,
+      "z": 135.07
+    },
+    "volumeMm3": 3434879.424,
+    "surfaceAreaMm2": 362580.837,
+    "triangleCount": 35374,
+    "vertexCount": 32773
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

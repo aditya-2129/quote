@@ -1,0 +1,49 @@
+{
+  "fixture": "local_test_button_9_cavity.stp",
+  "purpose": "Existing local multi-cavity button fixture for repeated-body detection.",
+  "categories": [
+    "assembly",
+    "duplicate grouping",
+    "small repeated cavities"
+  ],
+  "source": {
+    "kind": "existing-local-fixture",
+    "name": "TEST BUTTON_9 CAVITY_29X12 (1).stp",
+    "url": "public/test_files/TEST BUTTON_9 CAVITY_29X12 (1).stp",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 260567,
+    "sha256": "bef891925458e8ed4745ebca9210ac3421615998ef08c68af75051f0a44e73a1"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 26,
+    "duplicateGroupCount": 7,
+    "duplicateGroupSizes": [
+      9,
+      8,
+      4,
+      2,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "multi-cavity-fixture",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 200,
+      "y": 200,
+      "z": 36.5
+    },
+    "volumeMm3": 1445116.1,
+    "surfaceAreaMm2": 305440.305,
+    "triangleCount": 14528,
+    "vertexCount": 14146
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

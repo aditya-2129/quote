@@ -1,0 +1,48 @@
+{
+  "fixture": "local_locus_machine_fixture.stp",
+  "purpose": "Existing local fixture assembly used for CAD handoff acceptance; expected to exercise duplicate grouping.",
+  "categories": [
+    "assembly",
+    "duplicate grouping",
+    "rotated duplicates"
+  ],
+  "source": {
+    "kind": "existing-local-fixture",
+    "name": "LOCUS SYSTEMS MACHINE FIXTURE.stp",
+    "url": "public/test_files/LOCUS SYSTEMS MACHINE FIXTURE.stp",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 4288313,
+    "sha256": "6ce0999e819a83a65beb5a5c72022c16c324e82948a8df2812e8181a9e7b471e"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 10,
+    "duplicateGroupCount": 6,
+    "duplicateGroupSizes": [
+      4,
+      2,
+      1,
+      1,
+      1,
+      1
+    ],
+    "dominantShape": "assembly-fixture",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 100,
+      "y": 99.872,
+      "z": 194.5
+    },
+    "volumeMm3": 294892.091,
+    "surfaceAreaMm2": 119166.463,
+    "triangleCount": 17284,
+    "vertexCount": 15890
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}

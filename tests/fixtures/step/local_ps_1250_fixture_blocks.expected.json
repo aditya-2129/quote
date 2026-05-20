@@ -1,0 +1,44 @@
+{
+  "fixture": "local_ps_1250_fixture_blocks.stp",
+  "purpose": "Existing local rectangular fixture block set.",
+  "categories": [
+    "simple machined plate",
+    "block stock",
+    "existing local CAD"
+  ],
+  "source": {
+    "kind": "existing-local-fixture",
+    "name": "PS_1250_FIXTURE BLOCKS.stp",
+    "url": "public/test_files/PS_1250_FIXTURE BLOCKS.stp",
+    "license": "internal/local fixture; no third-party license recorded in repo"
+  },
+  "file": {
+    "sizeBytes": 343623,
+    "sha256": "5baf6e0db0e8b01c43981e4acf2f22b3eb5b7c9ab9d99070ac5324f9761cd569"
+  },
+  "expected": {
+    "unit": "millimeter",
+    "meshCount": 2,
+    "duplicateGroupCount": 2,
+    "duplicateGroupSizes": [
+      1,
+      1
+    ],
+    "dominantShape": "rectangular-blocks",
+    "holeCount": null,
+    "boundingBoxMm": {
+      "x": 160,
+      "y": 88.94,
+      "z": 200
+    },
+    "volumeMm3": 2102528.959,
+    "surfaceAreaMm2": 186986.783,
+    "triangleCount": 14210,
+    "vertexCount": 10060
+  },
+  "groundTruth": {
+    "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Generated/self-authored fixtures use known CadQuery source dimensions; existing local fixtures preserve computed import baselines for later regression tests.",
+    "reviewedBy": "Codex",
+    "reviewDate": "2026-05-20"
+  }
+}
