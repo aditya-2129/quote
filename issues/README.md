@@ -29,6 +29,10 @@ Local issue tracker for the roadmap in `plans/enterprise-cad-roadmap.md`.
 |---|---|---|
 | 001 | c9d116b | Vitest setup, alias sanity tests, lint baseline cleaned |
 | 002 | daa209c | STEP fixture suite with 25 curated fixtures, expected metadata, provenance, and visual review |
+| 003 | 8d3658f | meshFingerprint golden tests against the full fixture suite + node-friendly OCCT loader helper |
+| 004 | 8a2db7e | shapeAnalysis golden tests across 16 single-body fixtures; added self_hex_standoff and self_filleted_cylinder fixtures; locked in self_hex_bar→box as documented tessellation limitation |
+| 005 | 0a71c94 | quoteCosting golden tests — 103 tests covering all 20 public functions; one LIMITATION comment locking in hardcoded finishingCost=0 in calculateQuoteRollup |
+| 006 | 532cbaa | Dropped fabricated edgeCount field from types, schema, serialization, and 7 call sites; added migration 0010_drop_edge_count.sql |
 
 ## Suggested execution order
 
