@@ -23,6 +23,12 @@ Local issue tracker for the roadmap in `plans/enterprise-cad-roadmap.md`.
 **HITL (13):** 002, 007, 009, 015, 031, 032, 033, 034, 044, 045, 046, 049, 050
 **AFK (37):** everything else
 
+## Completed
+
+| Issue | Commit | Notes |
+|---|---|---|
+| 001 | c9d116b | Vitest setup, alias sanity tests, lint baseline cleaned |
+
 ## Suggested execution order
 
 Phase 0 fully before Phase 1.

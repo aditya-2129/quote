@@ -1,7 +1,8 @@
 # 001 — Add vitest + test scripts to package.json
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: c9d116b
 
 ## What to build
 
@@ -9,11 +10,11 @@ Stand up the test framework so subsequent issues can land tests. Add `vitest` an
 
 ## Acceptance criteria
 
-- [ ] `npm run test` exits 0 on an empty test suite
-- [ ] `npm run test:watch` runs in watch mode
-- [ ] A trivial sanity test (`expect(1 + 1).toBe(2)`) passes
-- [ ] Existing `npm run build` and `npm run lint` still pass
-- [ ] Vite path aliases (`@utils`, `@components`) resolve in tests
+- [x] `npm run test` exits 0 on an empty test suite
+- [x] `npm run test:watch` runs in watch mode
+- [x] A trivial sanity test (`expect(1 + 1).toBe(2)`) passes
+- [x] Existing `npm run build` and `npm run lint` still pass
+- [x] Vite path aliases (`@utils`, `@components`) resolve in tests
 
 ## Blocked by
 
