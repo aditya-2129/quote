@@ -37,6 +37,8 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 005 | 0a71c94 | quoteCosting golden tests — 103 tests covering all 20 public functions; one LIMITATION comment locking in hardcoded finishingCost=0 in calculateQuoteRollup |
 | 006 | 532cbaa | Dropped fabricated edgeCount field from types, schema, serialization, and 7 call sites; added migration 0010_drop_edge_count.sql |
 | 007 | 456237e | Split CadViewer into focused submodules, preserved public API/protected explode logic, and visually verified all 6 local STEP fixtures |
+| 008 | cad5a50 | Added app root ErrorBoundary with reload, copy diagnostics, and plugin-log best-effort logging |
+| 009 | f5d005c | Added local-only crash diagnostics for renderer crashes, global renderer errors, and Rust panic reports |
 
 ## Suggested execution order
 

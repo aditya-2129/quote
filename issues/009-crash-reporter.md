@@ -1,7 +1,8 @@
 # 009 - Local crash diagnostics export
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: f5d005c
 
 ## What to build
 
@@ -19,14 +20,14 @@ No network transport, no Sentry/GlitchTip, no S3, no source-map upload pipeline.
 
 ## Acceptance criteria
 
-- [ ] Local-only decision documented in `docs/adr/` with the reason remote crash reporting was rejected
-- [ ] Renderer `ErrorBoundary` crashes create a structured local JSON crash report
-- [ ] Global renderer `error` and `unhandledrejection` events create structured local JSON crash reports
-- [ ] Rust panics create a structured local JSON crash report under app-data
-- [ ] Report schema includes timestamp, app version, platform, route/window context, error message, stack/backtrace when available, and source (`renderer-boundary`, `renderer-global`, `rust-panic`)
-- [ ] PII redaction documented and enforced: no quote contents, no customer names, no CAD file contents, no full STEP bytes
-- [ ] User can open the crash reports folder or copy/export the latest report from an existing debug/settings surface
-- [ ] Manual verification covers one renderer crash and one simulated Rust-side panic/error path
+- [x] Local-only decision documented in `docs/adr/` with the reason remote crash reporting was rejected
+- [x] Renderer `ErrorBoundary` crashes create a structured local JSON crash report
+- [x] Global renderer `error` and `unhandledrejection` events create structured local JSON crash reports
+- [x] Rust panics create a structured local JSON crash report under app-data
+- [x] Report schema includes timestamp, app version, platform, route/window context, error message, stack/backtrace when available, and source (`renderer-boundary`, `renderer-global`, `rust-panic`)
+- [x] PII redaction documented and enforced: no quote contents, no customer names, no CAD file contents, no full STEP bytes
+- [x] User can open the crash reports folder or copy/export the latest report from an existing debug/settings surface
+- [x] Manual verification covers one renderer crash and one simulated Rust-side panic/error path
 
 ## Blocked by
 
