@@ -1,7 +1,8 @@
 # 005 — Golden tests for quoteCosting invariants
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 0a71c94
 
 ## What to build
 
@@ -11,10 +12,10 @@ Reuse existing types from `src/utils/quoteTypes.ts`.
 
 ## Acceptance criteria
 
-- [ ] Test for each public function in `quoteCosting.ts`
-- [ ] Edge cases covered: zero quantity, missing material, zero operations
-- [ ] Rounding behavior asserted (no float drift)
-- [ ] Tests document invariants in describe/it titles (acts as living spec)
+- [x] Test for each public function in `quoteCosting.ts`
+- [x] Edge cases covered: zero quantity, missing material, zero operations
+- [x] Rounding behavior asserted (no float drift)
+- [x] Tests document invariants in describe/it titles (acts as living spec)
 
 ## Blocked by
 
