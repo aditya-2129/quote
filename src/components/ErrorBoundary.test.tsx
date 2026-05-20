@@ -95,6 +95,9 @@ describe("ErrorBoundary Component", () => {
     const parsed = JSON.parse(copiedText);
 
     expect(parsed.message).toBe("Test render error");
+    expect(parsed.source).toBe("renderer-boundary");
+    expect(parsed.appVersion).toBeDefined();
+    expect(parsed.platform).toBeDefined();
     expect(parsed.stack).toBeDefined();
     expect(parsed.route).toBeDefined();
     expect(parsed.timestamp).toBeDefined();

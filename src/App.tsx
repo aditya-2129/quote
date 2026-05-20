@@ -1,4 +1,5 @@
 import { HashRouter, Routes, Route, Navigate, Outlet, useParams } from "react-router-dom";
+import { useEffect } from "react";
 import { Layout } from "@components/Layout";
 import { AppUpdaterPrompt } from "@components/AppUpdaterPrompt";
 import { ErrorBoundary } from "@components/ErrorBoundary";
@@ -16,6 +17,12 @@ import {
   MachinesPage,
   SettingsPage,
 } from "@pages/index";
+import { installGlobalCrashReportListeners } from "@utils/crashReports";
+
+function CrashReportListeners() {
+  useEffect(() => installGlobalCrashReportListeners(), []);
+  return null;
+}
 
 function QuoteLayout() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +44,7 @@ function App() {
     <ErrorBoundary>
       <HashRouter>
         <AppUpdaterPrompt />
+        <CrashReportListeners />
         <Routes>
           <Route element={<CadProvider><Layout /></CadProvider>}>
             <Route index element={<Navigate to="/quotes" replace />} />

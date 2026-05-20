@@ -23,8 +23,8 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 
 ## HITL vs AFK summary
 
-**HITL (8):** 002, 009, 015, 031, 032, 033, 034, 044
-**AFK (36):** everything else
+**HITL (7):** 002, 015, 031, 032, 033, 034, 044
+**AFK (37):** everything else
 
 ## Completed
 

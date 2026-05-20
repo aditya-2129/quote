@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw, Copy, Check } from "lucide-react";
 import { isTauriRuntime } from "@utils/tauriRuntime";
+import { createCrashReport, recordCrashReport, type CrashReport } from "@utils/crashReports";
 
 interface Props {
   children: ReactNode;
@@ -27,6 +28,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
+    void recordCrashReport({
+      source: "renderer-boundary",
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack ?? undefined,
+    }).catch((err) => console.error("ErrorBoundary failed to write crash report:", err));
     this.logToTauri(error, errorInfo);
   }
 
@@ -55,14 +62,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private copyDiagnostics = () => {
-    const { error } = this.state;
-    const diagnostic = {
-      message: error?.message || "Unknown error",
-      stack: error?.stack || "N/A",
-      route: window.location.hash || window.location.pathname || "N/A",
-      timestamp: new Date().toISOString(),
-      userAgent: navigator.userAgent || "N/A",
-    };
+    const diagnostic = this.createDiagnosticPayload();
     const jsonStr = JSON.stringify(diagnostic, null, 2);
 
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
@@ -79,6 +79,16 @@ export class ErrorBoundary extends Component<Props, State> {
     } else {
       this.fallbackCopy(jsonStr);
     }
+  };
+
+  private createDiagnosticPayload = (): CrashReport => {
+    const { error, errorInfo } = this.state;
+    return createCrashReport({
+      source: "renderer-boundary",
+      message: error?.message || "Unknown error",
+      stack: error?.stack,
+      componentStack: errorInfo?.componentStack ?? undefined,
+    });
   };
 
   private fallbackCopy = (text: string) => {

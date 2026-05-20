@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
   AlertTriangle,
+  Bug,
   Building2,
   Check,
+  ClipboardCopy,
   FileText,
   FolderOpen,
   History,
@@ -17,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { getAllSettings, setSetting } from "../db/queries";
 import type { AppSettingKey } from "../db/schema";
 import { isTauriRuntime } from "../utils/tauriRuntime";
+import { getLatestCrashReportText, openCrashReportsFolder, writeTestRustCrashReport } from "../utils/crashReports";
 
 type SettingsForm = {
   unitSystem: "metric" | "imperial";
@@ -40,7 +43,7 @@ type SettingsForm = {
   recentFilesLimit: string;
 };
 
-type SettingsSection = "general" | "company" | "quotation" | "history";
+type SettingsSection = "general" | "company" | "quotation" | "history" | "diagnostics";
 
 const DEFAULT_FORM: SettingsForm = {
   unitSystem: "metric",
@@ -71,6 +74,7 @@ const SETTINGS_NAV = [
   { id: "company", label: "Company", icon: Building2 },
   { id: "quotation", label: "Quotation", icon: FileText },
   { id: "history", label: "Recent files", icon: History },
+  { id: "diagnostics", label: "Diagnostics", icon: Bug },
 ] satisfies Array<{ id: SettingsSection; label: string; icon: LucideIcon }>;
 
 function stringSetting(value: unknown, fallback = "") {
@@ -450,6 +454,7 @@ export function SettingsPage() {
               {activeSection === "company" && <CompanySettings form={form} set={set} errors={errors} />}
               {activeSection === "quotation" && <QuotationSettings form={form} set={set} />}
               {activeSection === "history" && <HistorySettings form={form} set={set} errors={errors} />}
+              {activeSection === "diagnostics" && <DiagnosticsSettings />}
             </>
           )}
         </main>
@@ -959,6 +964,75 @@ function HistorySettings({
             {errors.recentFilesLimit && <span className="field-error">{errors.recentFilesLimit}</span>}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function DiagnosticsSettings() {
+  const [status, setStatus] = useState("");
+
+  const copyLatestReport = async () => {
+    try {
+      const report = await getLatestCrashReportText();
+      if (!report) {
+        setStatus("No crash reports found.");
+        return;
+      }
+      await navigator.clipboard.writeText(report);
+      setStatus("Latest crash report copied.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to copy crash report.");
+    }
+  };
+
+  const openReportsFolder = async () => {
+    try {
+      await openCrashReportsFolder();
+      setStatus("Crash reports folder opened.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to open crash reports folder.");
+    }
+  };
+
+  const writeTestReport = async () => {
+    try {
+      const path = await writeTestRustCrashReport();
+      setStatus(`Test Rust crash report written: ${path}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to write test crash report.");
+    }
+  };
+
+  return (
+    <section className="settings-pane">
+      <h2>Diagnostics</h2>
+      <div className="settings-group">
+        <div className="settings-control-row">
+          <div>
+            <div className="settings-control-title">Crash reports</div>
+            <div className="settings-control-help">Reports are stored locally under the app-data folder. Nothing is uploaded automatically.</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button className="btn sm" type="button" onClick={openReportsFolder} disabled={!isTauriRuntime()}>
+              <FolderOpen size={14} /> Open folder
+            </button>
+            <button className="btn sm" type="button" onClick={copyLatestReport}>
+              <ClipboardCopy size={14} /> Copy latest
+            </button>
+            {import.meta.env.DEV && (
+              <button className="btn sm" type="button" onClick={writeTestReport} disabled={!isTauriRuntime()}>
+                <Bug size={14} /> Write test report
+              </button>
+            )}
+          </div>
+        </div>
+        {status && (
+          <div className="quote-page-error" style={{ margin: 0 }}>
+            <AlertTriangle size={15} />
+            <span>{status}</span>
+          </div>
+        )}
       </div>
     </section>
   );

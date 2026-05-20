@@ -1,4 +1,197 @@
+use serde_json::{json, Value};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_sql::{Migration, MigrationKind};
+
+const CRASH_REPORT_DIR: &str = "crash-reports";
+
+fn crash_reports_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join(CRASH_REPORT_DIR))
+        .map_err(|err| format!("Unable to resolve app data dir: {err}"))
+}
+
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn write_report_to_dir(dir: &Path, mut report: Value) -> Result<PathBuf, String> {
+    fs::create_dir_all(dir).map_err(|err| format!("Unable to create crash report dir: {err}"))?;
+
+    if let Some(object) = report.as_object_mut() {
+        object
+            .entry("timestamp")
+            .or_insert_with(|| json!(format!("{}", now_millis())));
+        object
+            .entry("appVersion")
+            .or_insert_with(|| json!(env!("CARGO_PKG_VERSION")));
+        object
+            .entry("platform")
+            .or_insert_with(|| json!(std::env::consts::OS));
+    }
+
+    let source = report
+        .get("source")
+        .and_then(Value::as_str)
+        .unwrap_or("crash")
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' { ch } else { '-' })
+        .collect::<String>();
+    let path = dir.join(format!("{}-{}.json", now_millis(), source));
+    let body = serde_json::to_string_pretty(&report)
+        .map_err(|err| format!("Unable to serialize crash report: {err}"))?;
+    fs::write(&path, body).map_err(|err| format!("Unable to write crash report: {err}"))?;
+    Ok(path)
+}
+
+#[tauri::command]
+fn write_crash_report(app: AppHandle, report: Value) -> Result<String, String> {
+    let dir = crash_reports_dir(&app)?;
+    write_report_to_dir(&dir, report).map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn get_latest_crash_report(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = crash_reports_dir(&app)?;
+    if !dir.exists() {
+        return Ok(None);
+    }
+
+    let mut entries = fs::read_dir(&dir)
+        .map_err(|err| format!("Unable to read crash report dir: {err}"))?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(modified, _)| *modified);
+
+    match entries.pop() {
+        Some((_, path)) => fs::read_to_string(path)
+            .map(Some)
+            .map_err(|err| format!("Unable to read latest crash report: {err}")),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+fn open_crash_reports_folder(app: AppHandle) -> Result<(), String> {
+    let dir = crash_reports_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|err| format!("Unable to create crash report dir: {err}"))?;
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("explorer");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Unable to open crash report folder: {err}"))
+}
+
+#[tauri::command]
+fn write_test_rust_crash_report(app: AppHandle) -> Result<String, String> {
+    let dir = crash_reports_dir(&app)?;
+    write_report_to_dir(
+        &dir,
+        json!({
+            "source": "rust-panic",
+            "message": "Simulated Rust panic report",
+            "stack": "Simulated panic path for manual verification",
+            "route": "settings/diagnostics",
+        }),
+    )
+    .map(|path| path.to_string_lossy().to_string())
+}
+
+fn install_panic_hook(crash_dir: PathBuf) {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let message = panic_info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|value| (*value).to_string())
+            .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "Rust panic".to_string());
+        let location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+        let _ = write_report_to_dir(
+            &crash_dir,
+            json!({
+                "source": "rust-panic",
+                "message": message,
+                "stack": backtrace,
+                "route": "native",
+                "context": {
+                    "location": location,
+                    "thread": std::thread::current().name().unwrap_or("unnamed"),
+                },
+            }),
+        );
+        default_hook(panic_info);
+    }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_report_to_dir_creates_json_with_defaults() {
+        let dir = std::env::temp_dir().join(format!("quote-crash-report-test-{}", now_millis()));
+        let path = write_report_to_dir(
+            &dir,
+            json!({
+                "source": "rust-panic",
+                "message": "Simulated panic",
+                "route": "settings/diagnostics",
+            }),
+        )
+        .expect("crash report path");
+
+        let body = fs::read_to_string(path).expect("crash report body");
+        let report: Value = serde_json::from_str(&body).expect("crash report json");
+
+        assert_eq!(report["source"], "rust-panic");
+        assert_eq!(report["message"], "Simulated panic");
+        assert_eq!(report["route"], "settings/diagnostics");
+        assert!(report["timestamp"].is_string());
+        assert_eq!(report["appVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(report["platform"], std::env::consts::OS);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -62,6 +255,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            let crash_dir = app
+                .path()
+                .app_data_dir()
+                .map(|dir| dir.join(CRASH_REPORT_DIR))?;
+            install_panic_hook(crash_dir);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -71,6 +269,12 @@ pub fn run() {
             }
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            write_crash_report,
+            get_latest_crash_report,
+            open_crash_reports_folder,
+            write_test_rust_crash_report
+        ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(

@@ -23,7 +23,7 @@ Current realistic position: ~15–25% toward enterprise-grade. The architecture 
 | Test fixtures | None | (absent) |
 | Web Workers | None — `occt-import-js` blocks main thread | `src/utils/cad.ts:340` |
 | Geometry cache | Source bytes + bbox/volume only; no fingerprint/topology cache | `src/db/schema/quote_cad_sources.ts`, `src/db/schema/part_geometry.ts` |
-| Error tracking | No Sentry, no ErrorBoundary | (absent) |
+| Error tracking | No local crash diagnostics, no ErrorBoundary | (absent) |
 | Edge count | Fabricated `faceCount * 1.5` | `src/utils/cad.ts:278` |
 | BREP access | None — only triangulated mesh | `src/utils/cad.ts:340-409` |
 | Feature recognition | None | (absent) |
@@ -48,7 +48,7 @@ Before deeper investment, close the holes that will compound debt later.
 
 ### 0.3 Crash observability
 - Add React `ErrorBoundary` at app root in `src/App.tsx`
-- Add Sentry (or self-hosted GlitchTip) for desktop crash reporting via `@sentry/electron`-equivalent for Tauri, or manual Tauri command bridging crash reports
+- Add local-only crash diagnostics: renderer errors and Rust panics write structured reports under the Tauri app-data dir, with manual copy/export from the app
 - Wire `tauri-plugin-log` to disk with rotation
 
 ### 0.4 Verify suspicious dependencies
@@ -292,7 +292,7 @@ Each phase gets its own verification gate. Do not advance to phase N+1 until pha
 - `npm run test` — all golden tests pass on fixture suite
 - `npm run lint` clean
 - `npm run build` clean
-- Manually crash the app → Sentry receives report → ErrorBoundary shows fallback UI
+- Manually crash the app → local crash report is written → ErrorBoundary shows fallback UI
 
 ### Phase 1 verification
 - Import a 50 MB STEP file → UI remains responsive (frame time <50ms) during import
