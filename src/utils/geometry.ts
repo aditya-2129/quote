@@ -38,7 +38,6 @@ export function summarizeGeometry(input: StepGeometryInput): GeometrySummary {
     longestDimensionMm: dimensions.length > 0 ? Math.max(...dimensions) : 0,
     shortestDimensionMm: dimensions.length > 0 ? Math.min(...dimensions) : 0,
     faceCount: Math.trunc(positive(input.faceCount)),
-    edgeCount: Math.trunc(positive(input.edgeCount)),
     vertexCount: Math.trunc(positive(input.vertexCount)),
   };
 }

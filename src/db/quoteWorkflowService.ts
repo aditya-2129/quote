@@ -77,7 +77,6 @@ export type QuoteWorkflowPartGeometryDraft = {
   volumeMm3?: number;
   surfaceAreaMm2?: number;
   faceCount?: number;
-  edgeCount?: number;
   vertexCount?: number;
 };
 
@@ -285,7 +284,6 @@ function geometryToDraft(geometry: PartGeometry | null): QuoteWorkflowPartGeomet
     volumeMm3: geometry.volumeMm3,
     surfaceAreaMm2: geometry.surfaceAreaMm2,
     faceCount: geometry.faceCount,
-    edgeCount: geometry.edgeCount,
     vertexCount: geometry.vertexCount,
   };
 }
@@ -357,7 +355,6 @@ async function savePartChildren(
       volumeMm3: finiteNumber(geometry.volumeMm3 ?? part.netVolumeMm3),
       surfaceAreaMm2: finiteNumber(geometry.surfaceAreaMm2),
       faceCount: Math.trunc(finiteNumber(geometry.faceCount)),
-      edgeCount: Math.trunc(finiteNumber(geometry.edgeCount)),
       vertexCount: Math.trunc(finiteNumber(geometry.vertexCount)),
     });
   } else {

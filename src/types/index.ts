@@ -20,7 +20,6 @@ export type StepGeometryInput = {
   volumeMm3?: number;
   surfaceAreaMm2?: number;
   faceCount?: number;
-  edgeCount?: number;
   vertexCount?: number;
 };
 
@@ -41,7 +40,6 @@ export type GeometrySummary = {
   longestDimensionMm: number;
   shortestDimensionMm: number;
   faceCount: number;
-  edgeCount: number;
   vertexCount: number;
 };
 

@@ -97,7 +97,7 @@ const initialDb: BrowserDb = {
     { id: "stock-demo-plug", partId: "part-demo-plug", shape: "round-bar", dims: { D: 16, L: 24 }, createdAt: seedDate },
   ],
   partGeometry: [
-    { id: "geom-demo-body", partId: "part-demo-body", fileName: "pump-manifold-v3.step", unitSystem: "metric", bboxXMm: 120, bboxYMm: 80, bboxZMm: 42, volumeMm3: 526000, surfaceAreaMm2: 38400, faceCount: 142, edgeCount: 318, vertexCount: 176, createdAt: seedDate },
+    { id: "geom-demo-body", partId: "part-demo-body", fileName: "pump-manifold-v3.step", unitSystem: "metric", bboxXMm: 120, bboxYMm: 80, bboxZMm: 42, volumeMm3: 526000, surfaceAreaMm2: 38400, faceCount: 142, vertexCount: 176, createdAt: seedDate },
   ],
   partOperations: [
     { id: "op-demo-body-setup", partId: "part-demo-body", machineId: "mach-mill3ax", setupMin: 45, cycleMin: 18, notes: "Rough and finish milling", sortOrder: 0, createdAt: seedDate },
@@ -480,7 +480,6 @@ export const browserDb = {
       volumeMm3: 0,
       surfaceAreaMm2: 0,
       faceCount: 0,
-      edgeCount: 0,
       vertexCount: 0,
       ...data,
       id: newId("geom"),

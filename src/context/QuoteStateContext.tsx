@@ -119,7 +119,6 @@ function draftSignature(draft: QuoteWorkflowDraft): string {
         volumeMm3: part.geometry.volumeMm3 ?? 0,
         surfaceAreaMm2: part.geometry.surfaceAreaMm2 ?? 0,
         faceCount: part.geometry.faceCount ?? 0,
-        edgeCount: part.geometry.edgeCount ?? 0,
         vertexCount: part.geometry.vertexCount ?? 0,
       } : null,
       operations: part.operations.map(op => ({

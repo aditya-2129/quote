@@ -64,7 +64,6 @@ function createBoxGeometrySummary(
     volumeMm3: width * height * depth,
     surfaceAreaMm2: 2 * (width * height + width * depth + height * depth),
     faceCount: 6,
-    edgeCount: 12,
     vertexCount: 8,
   };
 }
@@ -96,7 +95,6 @@ export function createSampleCadModel(): CadImportResult {
       volumeMm3: 196_000,
       surfaceAreaMm2: 34_800,
       faceCount: 42,
-      edgeCount: 116,
       vertexCount: 188,
     },
     source: "sample",
@@ -275,7 +273,6 @@ function analyzeBufferGeometries(
     volumeMm3: Math.abs(signedVolumeMm3),
     surfaceAreaMm2,
     faceCount: Math.round(faceCount),
-    edgeCount: Math.round(faceCount * 1.5),
     vertexCount,
   };
 }

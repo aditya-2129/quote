@@ -14,7 +14,6 @@ export const partGeometry = sqliteTable("part_geometry", {
   volumeMm3: real("volume_mm3").notNull().default(0),
   surfaceAreaMm2: real("surface_area_mm2").notNull().default(0),
   faceCount: integer("face_count").notNull().default(0),
-  edgeCount: integer("edge_count").notNull().default(0),
   vertexCount: integer("vertex_count").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
