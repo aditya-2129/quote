@@ -1,7 +1,8 @@
 # 004 — Golden tests for shapeAnalysis classification
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 8a2db7e
 
 ## What to build
 
@@ -11,10 +12,10 @@ Tolerance budget: ±0.5 mm on dimensions, exact match on `kind`.
 
 ## Acceptance criteria
 
-- [ ] At least 3 cylinder fixtures, 2 hex fixtures, 5 box fixtures asserted
-- [ ] Filleted cylinder fixture still classified as cylinder (not box)
-- [ ] Failure messages include actual vs expected dimensions for debugging
-- [ ] No false positives: box-shaped fixtures must NOT be classified as cylinder/hex
+- [x] At least 3 cylinder fixtures, 2 hex fixtures, 5 box fixtures asserted
+- [x] Filleted cylinder fixture still classified as cylinder (not box)
+- [x] Failure messages include actual vs expected dimensions for debugging
+- [x] No false positives: box-shaped fixtures must NOT be classified as cylinder/hex
 
 ## Blocked by
 
