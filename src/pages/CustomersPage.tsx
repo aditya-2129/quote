@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Users, Plus, Edit2, Trash2, X, AlertTriangle } from "lucide-react";
 import { getAllCustomers, createCustomer, updateCustomer, deleteCustomer } from "../db/queries";
-import type { Customer } from "../db/schema";
+import type { Customer, NewCustomer } from "../db/schema";
 import { EmptyState } from "../components/EmptyState";
 
 export function CustomersPage() {
@@ -36,10 +36,9 @@ export function CustomersPage() {
     refresh();
   };
 
-  const handleSave = async (data: Partial<Customer>) => {
-    const { id, createdAt, updatedAt, ...cleanData } = data as any;
-    if (editingItem) await updateCustomer(editingItem.id, cleanData);
-    else await createCustomer(cleanData);
+  const handleSave = async (data: NewCustomer) => {
+    if (editingItem) await updateCustomer(editingItem.id, data);
+    else await createCustomer(data);
     setModalOpen(false);
     refresh();
   };
@@ -137,7 +136,7 @@ function ConfirmDialog({
 
 function CustomerModal({
   item, onClose, onSave,
-}: { item: Customer | null; onClose: () => void; onSave: (data: Partial<Customer>) => Promise<void> }) {
+}: { item: Customer | null; onClose: () => void; onSave: (data: NewCustomer) => Promise<void> }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -159,14 +158,13 @@ function CustomerModal({
     return e;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
-    const cleanData: Partial<Customer> = {
-      ...formData,
+    const cleanData: NewCustomer = {
       name: formData.name!.trim(),
       company: formData.company?.trim() || null,
       email: formData.email?.trim() || null,

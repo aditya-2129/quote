@@ -394,7 +394,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
               selectionFilter={selectionFilter}
               onMeasured={handleMeasured}
               onBodyMeasure={handleBodyMeasure}
-              onSelectMesh={id => { if (!measureActive) { id ? toggleSelection(id) : clearSelection(); } else if (selectionFilter === "point") { setMeasureStep(s => s === 0 ? 1 : 0); } }}
+              onSelectMesh={id => { if (!measureActive) { if (id) { toggleSelection(id); } else { clearSelection(); } } else if (selectionFilter === "point") { setMeasureStep(s => s === 0 ? 1 : 0); } }}
             />
             <div className="canvas-hud-top">
               <span className="pill"><Box size={11} /> {cad.fileName}</span>

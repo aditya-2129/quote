@@ -868,6 +868,9 @@ const resize = () => {
       controlsRef.current = null;
       sceneRef.current = null;
     };
+  // Scene setup is intentionally tied to model identity; live viewer props are
+  // applied by narrower effects below to avoid rebuilding the Three.js scene.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
   useEffect(() => {

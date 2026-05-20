@@ -295,6 +295,9 @@ export function QuotePreviewViewer({
       controlsRef.current = null;
       sceneRef.current = null;
     };
+  // Scene setup is intentionally tied to model identity; bg and visibility
+  // changes are applied by the narrower effect below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
   // Apply visibility + selection highlight without rebuilding the scene.

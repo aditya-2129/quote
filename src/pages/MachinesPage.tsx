@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Settings2, Plus, Edit2, Trash2, X, AlertTriangle } from "lucide-react";
 import { getAllMachines, createMachine, updateMachine, deleteMachine } from "../db/queries";
-import type { Machine, MachineCategory } from "../db/schema";
+import type { Machine, MachineCategory, NewMachine } from "../db/schema";
 import { EmptyState } from "../components/EmptyState";
 
 const CATEGORY_LABELS: Record<MachineCategory, string> = {
@@ -48,10 +48,9 @@ export function MachinesPage() {
     refresh();
   };
 
-  const handleSave = async (data: Partial<Machine>) => {
-    const { id, createdAt, updatedAt, ...cleanData } = data as any;
-    if (editingItem) await updateMachine(editingItem.id, cleanData);
-    else await createMachine(cleanData);
+  const handleSave = async (data: NewMachine) => {
+    if (editingItem) await updateMachine(editingItem.id, data);
+    else await createMachine(data);
     setModalOpen(false);
     refresh();
   };
@@ -164,7 +163,7 @@ function ConfirmDialog({
 
 function MachineModal({
   item, onClose, onSave,
-}: { item: Machine | null; onClose: () => void; onSave: (data: Partial<Machine>) => Promise<void> }) {
+}: { item: Machine | null; onClose: () => void; onSave: (data: NewMachine) => Promise<void> }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -192,17 +191,20 @@ function MachineModal({
     return e;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
-    const cleanData: Partial<Machine> = {
-      ...formData,
+    const cleanData: NewMachine = {
       name: formData.name!.trim(),
       shortName: formData.shortName!.trim(),
+      category: formData.category!,
       ratePerHour: Number(formData.ratePerHour),
+      notes: formData.notes?.trim() || null,
+      isActive: formData.isActive ?? true,
+      isSystem: formData.isSystem ?? false,
     };
 
     setSaveError("");

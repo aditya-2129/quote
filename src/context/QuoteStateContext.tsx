@@ -153,7 +153,9 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   // callbacks) can read the live value without re-creating itself on every
   // change to CadContext state.
   const pendingHandoffRef = useRef(cadCtx.pendingHandoff);
-  pendingHandoffRef.current = cadCtx.pendingHandoff;
+  useEffect(() => {
+    pendingHandoffRef.current = cadCtx.pendingHandoff;
+  }, [cadCtx.pendingHandoff]);
   const [parts, setParts] = useState<Part[]>([]);
   const [bops, setBops] = useState<Bop[]>([]);
   const [extraCosts, setExtraCosts] = useState<ExtraCost[]>(defaultExtraCosts);

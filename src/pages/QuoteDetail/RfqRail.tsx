@@ -242,8 +242,11 @@ function CustomerField({
     ? customerDisplayName(selectedCustomer)
     : (customerId ? value : "");
   const [draft, setDraft] = useState(committedLabel);
-
-  useEffect(() => { setDraft(committedLabel); }, [committedLabel]);
+  const [prevCommittedLabel, setPrevCommittedLabel] = useState(committedLabel);
+  if (committedLabel !== prevCommittedLabel) {
+    setPrevCommittedLabel(committedLabel);
+    setDraft(committedLabel);
+  }
 
   const typedName = draft.trim();
   const normalizedValue = typedName.toLocaleLowerCase();

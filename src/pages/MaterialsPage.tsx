@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Gem, Plus, Edit2, Trash2, X, AlertTriangle } from "lucide-react";
 import { getAllMaterials, createMaterial, updateMaterial, deleteMaterial } from "../db/queries";
-import type { Material } from "../db/schema";
+import type { Material, NewMaterial } from "../db/schema";
 import { EmptyState } from "../components/EmptyState";
 import { formatCurrency } from "../utils/helpers";
 
@@ -45,10 +45,9 @@ export function MaterialsPage() {
     refresh();
   };
 
-  const handleSave = async (data: Partial<Material>) => {
-    const { id, createdAt, updatedAt, ...cleanData } = data as any;
-    if (editingItem) await updateMaterial(editingItem.id, cleanData);
-    else await createMaterial(cleanData);
+  const handleSave = async (data: NewMaterial) => {
+    if (editingItem) await updateMaterial(editingItem.id, data);
+    else await createMaterial(data);
     setModalOpen(false);
     refresh();
   };
@@ -100,7 +99,7 @@ export function MaterialsPage() {
                           <span style={{ color: "var(--text-3)", marginRight: "4px" }}>
                             {FORM_LABELS[f] || f}:
                           </span>
-                          {formatCurrency((r.formRates as any)?.[f] || r.costPerKg, r.currency)}
+                          {formatCurrency(r.formRates[f] || r.costPerKg, r.currency)}
                         </span>
                       ))}
                     </div>
@@ -174,7 +173,7 @@ function MaterialModal({
 }: {
   item: Material | null;
   onClose: () => void;
-  onSave: (data: Partial<Material>) => Promise<void>;
+  onSave: (data: NewMaterial) => Promise<void>;
 }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -197,7 +196,7 @@ function MaterialModal({
 
   const toggleForm = (form: string) => {
     const currentForms = formData.availableForms || [];
-    const currentRates = (formData.formRates as any) || {};
+    const currentRates = formData.formRates ?? {};
 
     if (currentForms.includes(form)) {
       setFormData({
@@ -216,7 +215,7 @@ function MaterialModal({
   const handleRateChange = (form: string, rate: number) => {
     setFormData({
       ...formData,
-      formRates: { ...(formData.formRates as any), [form]: rate },
+      formRates: { ...(formData.formRates ?? {}), [form]: rate },
     });
   };
 
@@ -229,13 +228,13 @@ function MaterialModal({
     if (!density || density <= 0) e.densityKgPerM3 = "Must be greater than 0";
     if (!formData.availableForms?.length) e.availableForms = "Select at least one form";
     for (const f of formData.availableForms ?? []) {
-      const r = Number((formData.formRates as any)?.[f]);
+      const r = Number(formData.formRates?.[f]);
       if (isNaN(r) || r <= 0) e[`rate_${f}`] = `${FORM_LABELS[f]} rate must be greater than 0`;
     }
     return e;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const errs = validate();
     setErrors(errs);
@@ -244,14 +243,18 @@ function MaterialModal({
     const rates = Object.fromEntries(
       Object.entries(formData.formRates ?? {}).map(([k, v]) => [k, Number(v)]),
     );
-    const cleanData: Partial<Material> = {
-      ...formData,
+    const cleanData: NewMaterial = {
       name: formData.name!.trim(),
+      category: formData.category || null,
       currency: formData.currency!.trim().toUpperCase(),
       densityKgPerM3: Number(formData.densityKgPerM3),
       costPerKg: Number(formData.costPerKg) || 0,
       markupPercent: Number(formData.markupPercent) || 0,
+      availableForms: formData.availableForms ?? [],
       formRates: rates,
+      notes: formData.notes?.trim() || null,
+      isActive: formData.isActive ?? true,
+      isSystem: formData.isSystem ?? false,
     };
 
     setSaveError("");
@@ -378,7 +381,7 @@ function MaterialModal({
                             <input
                               type="number"
                               step="0.01"
-                              value={(formData.formRates as any)?.[f] ?? ""}
+                              value={formData.formRates?.[f] ?? ""}
                               onChange={(e) => { handleRateChange(f, parseFloat(e.target.value)); setErrors(ev => ({ ...ev, [`rate_${f}`]: "" })); }}
                               style={{ width: "100px", height: "28px", ...(errors[`rate_${f}`] ? { borderColor: "var(--danger)" } : {}) }}
                               placeholder="₹/kg"

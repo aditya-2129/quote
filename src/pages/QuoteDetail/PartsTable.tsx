@@ -58,11 +58,14 @@ export function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAd
     return ()=>document.removeEventListener("mousedown",onDoc);
   },[bulkOpen]);
   const partsRef = useRef(parts);
-  partsRef.current = parts;
   const setPartsRef = useRef(setParts);
-  setPartsRef.current = setParts;
   const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    partsRef.current = parts;
+    setPartsRef.current = setParts;
+    onSelectRef.current = onSelect;
+  });
   const stableUpdate = useCallback((id: string, patch: Partial<Part>) => { setPartsRef.current(partsRef.current.map(p => p.id === id ? { ...p, ...patch } : p)); }, []);
   const stableSelect = useCallback((id: string) => { onSelectRef.current(id); setExpandedId(id); }, []);
   const stableDelete = useCallback((id: string) => {

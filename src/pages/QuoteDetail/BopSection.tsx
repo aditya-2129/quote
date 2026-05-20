@@ -26,8 +26,11 @@ function BopNameCell({
   const [menuRect, setMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const committedLabel = bop.catalogId ? bop.name : "";
-
-  useEffect(() => { setDraft(committedLabel); }, [committedLabel]);
+  const [prevCommittedLabel, setPrevCommittedLabel] = useState(committedLabel);
+  if (committedLabel !== prevCommittedLabel) {
+    setPrevCommittedLabel(committedLabel);
+    setDraft(committedLabel);
+  }
 
   useEffect(() => {
     if (!open || !wrapRef.current) return;

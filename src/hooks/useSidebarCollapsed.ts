@@ -1,16 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export function useSidebarCollapsed(): [boolean, () => void, (val: boolean) => void] {
-  const [collapsed, setCollapsed] = useState<boolean>(false);
-
-  useEffect(() => {
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("quote:sidebar-collapsed");
       if (stored !== null) {
-        setCollapsed(stored === "true");
+        return stored === "true";
       }
     }
-  }, []);
+    return false;
+  });
 
   const toggle = () => {
     setCollapsed(prev => {

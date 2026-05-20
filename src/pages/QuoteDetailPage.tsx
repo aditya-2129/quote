@@ -13,6 +13,7 @@ import { BopSection } from "./QuoteDetail/BopSection";
 import { ExtraCostsSection } from "./QuoteDetail/ExtraCostsSection";
 import { QuotePreview, QuoteCadPreview } from "./QuoteDetail/Previews";
 import type { CadImportResult } from "@utils/index";
+import type { QuotePreviewViewerHandle } from "@components/QuotePreviewViewer";
 import { Box, Boxes, ChevronDown, ChevronRight, ExternalLink, Square, TriangleAlert, X } from "lucide-react";
 
 declare global {
@@ -28,19 +29,19 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery: string; on
   const [reattachPrompt, setReattachPrompt] = useState<{ incomingFile: string; existingFile: string } | null>(null);
   const [wasLoading, setWasLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const previewViewerRef = useRef<any>(null);
+  const previewViewerRef = useRef<QuotePreviewViewerHandle | null>(null);
   const getCadSnapshot = useCallback(() => previewViewerRef.current?.screenshot?.() ?? null, []);
   const [previewCollapsed, setPreviewCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem("quote.previewCollapsed") === "1"; } catch { return false; }
   });
 
-  useEffect(() => {
-    if (persistenceStatus === "loading") setWasLoading(true);
-  }, [persistenceStatus]);
+  if (persistenceStatus === "loading" && !wasLoading) {
+    setWasLoading(true);
+  }
   const loadSettled = wasLoading && persistenceStatus !== "loading";
 
   useEffect(() => {
-    try { localStorage.setItem("quote.previewCollapsed", previewCollapsed ? "1" : "0"); } catch {}
+    try { localStorage.setItem("quote.previewCollapsed", previewCollapsed ? "1" : "0"); } catch { /* ignore */ }
   }, [previewCollapsed]);
 
   const getAutoProjectName = useCallback((fileName: string) => {
@@ -77,7 +78,9 @@ function QuoteWorkspace({ searchQuery, onOpenViewer }: { searchQuery: string; on
     if (!pendingHandoff || !cad) return;
     if (!loadSettled) return;
     if (savedCadFileName && savedCadFileName !== cad.fileName) {
-      setReattachPrompt(prev => prev ?? { incomingFile: cad.fileName, existingFile: savedCadFileName });
+      setTimeout(() => {
+        setReattachPrompt(prev => prev ?? { incomingFile: cad.fileName, existingFile: savedCadFileName });
+      }, 0);
       return;
     }
     completeHandoff(false);

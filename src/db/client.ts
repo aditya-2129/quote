@@ -108,6 +108,7 @@ export async function getDb(): Promise<DbClient> {
       } catch (err) {
         throw new Error(
           `DB error [${method}]: ${err instanceof Error ? err.message : String(err)}\nSQL: ${sql}`,
+          { cause: err }
         );
       }
     },
