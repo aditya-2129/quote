@@ -1,5 +1,14 @@
 import * as THREE from "three";
 import { importStep } from "./cadWorker";
+import {
+  getCachedImport,
+  saveCachedImport,
+  getStoredOcctOptions,
+  getOcctOptionsDigest,
+  sha256,
+  incrementCacheMisses,
+  type OcctImportOptions,
+} from "./geometryCache";
 import type { SerializableMesh } from "../workers/occt.worker";
 import type { StepGeometryInput } from "../types";
 
@@ -43,6 +52,7 @@ export type CadMesh = {
   vertexCount: number;
   center: THREE.Vector3;
   occtIndex: number;
+  meshBlobPath?: string | null;
 };
 
 export type CadImportResult = {
@@ -52,6 +62,7 @@ export type CadImportResult = {
   geometry: StepGeometryInput;
   source: "step" | "sample";
   warning?: string;
+  cacheStatus?: "hit" | "miss";
 };
 
 function createBoxGeometrySummary(
@@ -369,13 +380,30 @@ export async function importStepBytes(
   fileName: string,
   buffer: Uint8Array,
   signal?: AbortSignal,
+  options?: OcctImportOptions,
+  forceReimport?: boolean,
 ): Promise<CadImportResult> {
   const isStep = /\.(step|stp)$/i.test(fileName);
   if (!isStep) {
     throw new Error("Upload a .step or .stp CAD file.");
   }
 
-  const result = await importStep(buffer, fileName, signal);
+  // 1. Compute SHA-256 and get active OCCT import options + digest
+  const fileHash = await sha256(buffer);
+  const activeOptions = options ?? getStoredOcctOptions();
+  const optionsDigest = await getOcctOptionsDigest(activeOptions);
+
+  // 2. Check the cache
+  if (!forceReimport) {
+    const cached = await getCachedImport(fileHash, optionsDigest);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  // 3. Cache miss: increment misses and do full import
+  incrementCacheMisses();
+  const result = await importStep(buffer, fileName, signal, activeOptions);
 
   if (!result.success || !Array.isArray(result.meshes)) {
     throw new Error(
@@ -412,7 +440,7 @@ export async function importStepBytes(
     meshIdByOcctIndex.set(mesh.occtIndex, mesh.id);
   });
 
-  return {
+  const importResult: CadImportResult = {
     fileName,
     meshes,
     rootNode:
@@ -426,4 +454,8 @@ export async function importStepBytes(
     geometry: analyzeBufferGeometries(fileName, meshes),
     source: "step",
   };
+
+  // 4. Save to cache
+  const savedResult = await saveCachedImport(fileHash, optionsDigest, importResult);
+  return savedResult;
 }

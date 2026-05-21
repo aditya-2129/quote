@@ -1,10 +1,13 @@
-﻿import * as Comlink from 'comlink';
+import * as Comlink from 'comlink';
 import type { WorkerImportResult } from '../workers/occt.worker';
+
+import type { OcctImportOptions } from './geometryCache';
 
 export async function importStep(
   buffer: Uint8Array,
   _fileName: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: OcctImportOptions
 ): Promise<WorkerImportResult> {
   if (signal?.aborted) {
     throw new DOMException('Import aborted', 'AbortError');
@@ -25,7 +28,7 @@ export async function importStep(
       // Transfer the buffer copy to the worker for high performance
       // Note: we transfer a copy of the buffer's ArrayBuffer so we don't detach the caller's buffer.
       const bufferCopy = new Uint8Array(buffer);
-      const res = await api.importStep(Comlink.transfer(bufferCopy, [bufferCopy.buffer]));
+      const res = await api.importStep(Comlink.transfer(bufferCopy, [bufferCopy.buffer]), options);
       return res;
     } finally {
       // Cleanup: release comlink proxy

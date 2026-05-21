@@ -47,4 +47,21 @@ export type Part = {
   // part isn't backed by CAD bodies (sample data, purchased items) — treat as
   // a single virtual body keyed by part.id.
   meshIds?: string[];
+  geometry?: {
+    fileName?: string;
+    unitSystem?: "metric" | "imperial";
+    bboxXMm?: number;
+    bboxYMm?: number;
+    bboxZMm?: number;
+    volumeMm3?: number;
+    surfaceAreaMm2?: number;
+    faceCount?: number;
+    vertexCount?: number;
+    fingerprintHash?: string | null;
+    triangleCount?: number | null;
+    shapeKind?: string | null;
+    shapeParams?: string | null;
+    faceColors?: string | null;
+    meshBlobPath?: string | null;
+  } | null;
 };
