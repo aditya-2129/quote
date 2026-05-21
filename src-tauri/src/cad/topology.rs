@@ -8,7 +8,9 @@
 //! The C++ boundary is intentionally narrow — four C functions — as
 //! described in ADR 0003.
 
+use super::serialize::{wrap_topology, TopologyEnvelope};
 use super::surfaces::SurfaceClassification;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -30,7 +32,7 @@ extern "C" {
 // ── Public types ───────────────────────────────────────────────────────
 
 /// Complete BREP topology payload returned by `extract_topology`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TopologyPayload {
     /// All faces in the shape, with wire loops.
     pub faces: Vec<TopoFace>,
@@ -41,7 +43,7 @@ pub struct TopologyPayload {
 }
 
 /// A single BREP face with its wire loops.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TopoFace {
     /// Deterministic ID (stable across re-imports of the same STEP file).
     pub id: String,
@@ -54,7 +56,7 @@ pub struct TopoFace {
 }
 
 /// A wire loop — an ordered sequence of edges forming a closed boundary.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TopoWire {
     /// Ordered edge IDs in this wire loop.
     pub edge_ids: Vec<String>,
@@ -63,7 +65,7 @@ pub struct TopoWire {
 }
 
 /// A single BREP edge.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TopoEdge {
     /// Deterministic ID (stable across re-imports of the same STEP file).
     pub id: String,
@@ -72,7 +74,7 @@ pub struct TopoEdge {
 }
 
 /// Face-edge adjacency entry: one face and all edges bounding it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AdjacencyEntry {
     /// Face ID.
     pub face_id: String,
@@ -86,7 +88,7 @@ pub struct AdjacencyEntry {
 ///
 /// Calls the C++ shim, which uses OCCT to parse the STEP data and
 /// extract faces, edges, wires, and adjacency with deterministic IDs.
-fn extract_topology_from_bytes(step_bytes: &[u8]) -> Result<TopologyPayload, String> {
+pub(crate) fn extract_topology_from_bytes(step_bytes: &[u8]) -> Result<TopologyPayload, String> {
     if step_bytes.is_empty() {
         return Err("STEP data is empty".to_string());
     }
@@ -125,15 +127,16 @@ fn extract_topology_from_bytes(step_bytes: &[u8]) -> Result<TopologyPayload, Str
 
 /// Extract BREP topology from a STEP file.
 ///
-/// Takes raw STEP file bytes and returns a `TopologyPayload` containing
-/// faces, edges, wire loops, and face-edge adjacency with deterministic IDs.
+/// Takes raw STEP file bytes and returns a versioned topology envelope.
 ///
 /// This runs on a blocking thread to avoid holding the async runtime.
 #[tauri::command]
-pub async fn extract_topology(step_bytes: Vec<u8>) -> Result<TopologyPayload, String> {
-    tauri::async_runtime::spawn_blocking(move || extract_topology_from_bytes(&step_bytes))
-        .await
-        .map_err(|e| format!("Topology extraction task panicked: {e}"))?
+pub async fn extract_topology(step_bytes: Vec<u8>) -> Result<TopologyEnvelope, String> {
+    let topology =
+        tauri::async_runtime::spawn_blocking(move || extract_topology_from_bytes(&step_bytes))
+            .await
+            .map_err(|e| format!("Topology extraction task panicked: {e}"))??;
+    Ok(wrap_topology(topology))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

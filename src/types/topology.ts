@@ -1,6 +1,6 @@
 /**
- * TypeScript types matching the Rust TopologyPayload from the
- * `extract_topology` Tauri command.
+ * TypeScript types matching the Rust TopologyPayload inside the
+ * versioned topology envelope.
  *
  * These mirror the serde-serialized Rust structs in
  * src-tauri/src/cad/topology.rs.

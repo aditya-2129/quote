@@ -340,6 +340,7 @@ pub fn run() {
             open_crash_reports_folder,
             write_test_rust_crash_report,
             open_logs_folder,
+            cad::serialize::topology_payload_schema,
             cad::topology::extract_topology
         ])
         .plugin(tauri_plugin_dialog::init())
