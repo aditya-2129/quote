@@ -1,5 +1,12 @@
 import * as THREE from "three";
 import { importStep } from "./cadWorker";
+import {
+  computeCacheKey,
+  lookupCachedImport,
+  recordCacheHit,
+  recordCacheMiss,
+  storeCachedImport,
+} from "./geometryCache";
 import type { SerializableMesh } from "../workers/occt.worker";
 import type { StepGeometryInput } from "../types";
 
@@ -369,11 +376,23 @@ export async function importStepBytes(
   fileName: string,
   buffer: Uint8Array,
   signal?: AbortSignal,
+  options?: { forceReimport?: boolean },
 ): Promise<CadImportResult> {
   const isStep = /\.(step|stp)$/i.test(fileName);
   if (!isStep) {
     throw new Error("Upload a .step or .stp CAD file.");
   }
+
+  const cacheKey = await computeCacheKey(buffer);
+  if (signal?.aborted) throw new DOMException("Import aborted", "AbortError");
+  if (!options?.forceReimport) {
+    const cached = await lookupCachedImport(cacheKey);
+    if (cached) {
+      recordCacheHit();
+      return { ...cached, fileName };
+    }
+  }
+  recordCacheMiss();
 
   const result = await importStep(buffer, fileName, signal);
 
@@ -412,18 +431,20 @@ export async function importStepBytes(
     meshIdByOcctIndex.set(mesh.occtIndex, mesh.id);
   });
 
-  return {
+  const importResult: CadImportResult = {
     fileName,
     meshes,
     rootNode:
       result.root && typeof result.root === "object"
-        ? buildTreeNode(
-            result.root as OcctNode,
-            meshIdByOcctIndex,
-            "root",
-          )
+        ? buildTreeNode(result.root as OcctNode, meshIdByOcctIndex, "root")
         : buildFallbackTree(fileName, meshes),
     geometry: analyzeBufferGeometries(fileName, meshes),
     source: "step",
   };
+
+  void storeCachedImport(cacheKey, importResult).catch((err) =>
+    console.warn("[cad] cache write failed", err),
+  );
+
+  return importResult;
 }

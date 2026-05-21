@@ -1,4 +1,5 @@
 ﻿import * as Comlink from 'comlink';
+import { DEFAULT_OCCT_OPTIONS } from '../utils/occtOptions';
 
 type BrepFace = {
   first: number;
@@ -47,12 +48,7 @@ export const occtWorkerApi = {
       const occt = await occtimportjs({
         locateFile: (path) => '/' + path,
       });
-      const result = occt.ReadStepFile(buffer, {
-        linearUnit: 'millimeter',
-        linearDeflectionType: 'bounding_box_ratio',
-        linearDeflection: 0.001,
-        angularDeflection: 0.5,
-      });
+      const result = occt.ReadStepFile(buffer, DEFAULT_OCCT_OPTIONS);
 
       if (!result.success || !Array.isArray(result.meshes)) {
         return {

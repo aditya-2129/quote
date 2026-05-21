@@ -20,6 +20,7 @@ import { getAllSettings, setSetting } from "../db/queries";
 import type { AppSettingKey } from "../db/schema";
 import { isTauriRuntime } from "../utils/tauriRuntime";
 import { getLatestCrashReportText, openCrashReportsFolder, writeTestRustCrashReport, openLogsFolder } from "../utils/crashReports";
+import { clearAllCache, getCacheStats, type CacheStats } from "../utils/geometryCache";
 
 type SettingsForm = {
   unitSystem: "metric" | "imperial";
@@ -971,6 +972,19 @@ function HistorySettings({
 
 function DiagnosticsSettings() {
   const [status, setStatus] = useState("");
+  const [cacheStats, setCacheStats] = useState<CacheStats>(() => getCacheStats());
+
+  const refreshCacheStats = () => setCacheStats(getCacheStats());
+
+  const clearGeometryCache = async () => {
+    try {
+      await clearAllCache();
+      refreshCacheStats();
+      setStatus("Geometry cache cleared.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to clear geometry cache.");
+    }
+  };
 
   const copyLatestReport = async () => {
     try {
@@ -1045,6 +1059,23 @@ function DiagnosticsSettings() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <button className="btn sm" type="button" onClick={openLogsFolderAction} disabled={!isTauriRuntime()}>
               <FolderOpen size={14} /> Open logs folder
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-control-row">
+          <div>
+            <div className="settings-control-title">Geometry cache</div>
+            <div className="settings-control-help">
+              Hits {cacheStats.hits} · Misses {cacheStats.misses} · Ratio {(cacheStats.ratio * 100).toFixed(0)}% (this session)
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button className="btn sm" type="button" onClick={refreshCacheStats}>
+              Refresh
+            </button>
+            <button className="btn sm" type="button" onClick={clearGeometryCache}>
+              Clear cache
             </button>
           </div>
         </div>
