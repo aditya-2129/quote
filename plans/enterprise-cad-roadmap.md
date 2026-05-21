@@ -10,11 +10,13 @@ But the system has a hard ceiling: **it operates on triangles, not BREP topology
 
 This document is the long-term roadmap to close that gap, ordered by dependency. The moat is deterministic geometric intelligence; AI on top of that is multiplicative, AI without it is a demo — so AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and is intentionally out of scope here.
 
-Current realistic position: ~15–25% toward enterprise-grade. The architecture direction is correct; the missing pieces are scope, not redesign.
+Current realistic position: ~40–50% toward enterprise-grade. Phases 0–3 are complete (foundation hygiene, async + caching, BREP topology, feature recognition + accessibility + feature-based costing). Granular issue-level tracking lives in `issues/README.md` — that file is the authoritative status board; this roadmap is the strategic narrative.
+
+The architecture direction is correct; the missing pieces are scope, not redesign.
 
 ---
 
-## Confirmed Infrastructure Gaps (from audit)
+## Original Audit Findings (snapshot at roadmap creation — see `issues/README.md` for current state)
 
 | Area | Current state | File |
 |------|---------------|------|

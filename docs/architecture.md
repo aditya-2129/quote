@@ -24,6 +24,12 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 - `src/utils/meshFingerprint.ts` groups identical bodies before quote row creation.
 - `src/utils/shapeAnalysis.ts` keeps its mesh-only call path for legacy consumers, and can optionally accept a `TopologyGraph` to prefer exact topology classification before falling back to the existing mesh histogram heuristic. It logs `[shapeAnalysis] path=topology` or `[shapeAnalysis] path=mesh` for debugging.
 
+## Feature Recognition
+
+- `src/utils/features/` holds the deterministic detectors that walk a `TopologyGraph` and produce typed feature arrays. Each detector exposes a single `detect<Feature>(graph)` function that returns an empty array when topology is absent. Modules: `holes.ts` (through/blind/counterbore/countersink with axial chain merging), `pockets.ts` (open/closed pockets via planar floors + perpendicular walls and an AABB ray cast for openness), `slots.ts` (rounded + rectangular slots filtered by aspect>2), `fillets.ts` (partial-span cylinder/cone/torus with convex vs concave via signed-distance to adjacent plane normals), `chamfers.ts` (narrow tilted planar strips between two adjacent planes), `threads.ts` (cylinder-diameter match against a hardcoded standard M3–M12 + UNC/UNF table; internal/external via concavity), and `bosses.ts` (round and rectangular protrusions from a base face; coexists with concentric holes).
+- All detectors are pure functions that consume `TopologyGraph` and produce typed `Feature[]`. They are independent of Drizzle, Tauri, and React — call them from anywhere.
+- `src/utils/manufacturing/accessibility.ts` consumes a heterogeneous `PartFeature[]` and runs greedy set-cover over each feature's approach directions to derive `setupCount`, classifies `maxAxisRequirement` (lathe / 3-axis / 4-axis / 5-axis / mill-turn / not-machinable), and surfaces inaccessible features with reasons.
+
 ## Quote Flow
 
 - `src/context/QuoteStateContext.tsx` currently owns parts, BOP rows, selected part, assembly quantity, commercial inputs, and RFQ fields.
@@ -33,7 +39,7 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 - `src/components/BopModal.tsx` is the shared create/edit modal for catalog BOPs, reused by the BOP catalog page and quote BOP picker.
 - `src/pages/BopsPage.tsx` manages the reusable brought-out-parts catalog.
 - `src/utils/quoteTypes.ts` defines the current quote workspace `Part`, `Bop`, `Stock`, and `Op` types.
-- `src/utils/quoteCosting.ts` owns the active quote rollup used by the quote workspace and persistence. Fixed tooling/inspection charges and finishing cost are currently zeroed/excluded.
+- `src/utils/quoteCosting.ts` owns the active quote rollup used by the quote workspace and persistence. Fixed tooling/inspection charges and finishing cost are currently zeroed/excluded. When a part has a `features` array attached, `src/utils/costing/featureCost.ts` contributes per-feature cycle time (drill/tap/pocket/slot/fillet/chamfer) on top of the operation-derived cost using named mm³/min and mm/min rate constants. Parts without features cost byte-identically to the legacy path; operator manual overrides on operations still apply on top.
 - `src/context/CatalogContext.tsx` owns material/machine catalog loading and exposes costing catalogs plus display labels to quote workspace components.
 - `src/utils/pdfAssembly.ts` prepares quotation data for PDF rendering; `src/utils/fileSave.ts` owns platform-aware save/download behavior.
 - `src/utils/quote.ts` and `src/types/` still represent an older quote calculation model. Be careful when wiring new export or persistence behavior.
@@ -41,7 +47,7 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 ## Data Layer
 
 - `src/db/client.ts` wraps the Tauri SQL plugin with Drizzle's SQLite proxy.
-- `src/db/schema/` defines normalized tables for RFQs, quotes, parts, geometry, stock, operations, BOP catalog, quote BOP rows, materials, machines, customers, DFM issues, notifications, settings, and recent files.
+- `src/db/schema/` defines normalized tables for RFQs, quotes, parts, geometry, stock, operations, BOP catalog, quote BOP rows, materials, machines, customers, DFM issues, notifications, settings, recent files, and BREP-detected `part_features` (one row per feature with a discriminated `PartFeatureData` JSON payload).
 - `src/db/queries/` has table-scoped CRUD helpers.
 - `src/db/quoteWorkflowService.ts` bridges the React quote draft to normalized RFQ/quote/part/BOP tables and computes persisted cost snapshots.
 - `src-tauri/migrations/` contains native SQLite migrations. Keep it in sync with `src/db/schema/`. **Every new `NNNN_*.sql` file must also be registered in the `migrations` vec in `src-tauri/src/lib.rs` — the Rust runner only applies what's listed there, so a file on disk alone is a silent no-op.**
