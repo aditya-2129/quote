@@ -23,6 +23,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopAbs_Orientation.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -33,11 +34,21 @@
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
 #include <BRepGProp.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Cone.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Sphere.hxx>
+#include <gp_Torus.hxx>
 
 // Standard library
 #include <string>
@@ -50,6 +61,7 @@
 #include <filesystem>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 
 // ── Result type ────────────────────────────────────────────────────────
 
@@ -80,6 +92,128 @@ static std::string json_escape(const std::string& s) {
 
 static std::string json_string(const std::string& s) {
     return "\"" + json_escape(s) + "\"";
+}
+
+static void append_vec3(std::ostringstream& js, const gp_Pnt& p) {
+    js << "[" << p.X() << "," << p.Y() << "," << p.Z() << "]";
+}
+
+static void append_vec3(std::ostringstream& js, const gp_Dir& d) {
+    js << "[" << d.X() << "," << d.Y() << "," << d.Z() << "]";
+}
+
+static double positive_radius(double r) {
+    return r < 0.0 ? -r : r;
+}
+
+static double normalized_angle_span(double span) {
+    const double twoPi = 6.28318530717958647692;
+    double value = positive_radius(span);
+    if (value > twoPi) {
+        value = std::fmod(value, twoPi);
+        if (value < 1e-9) {
+            return twoPi;
+        }
+    }
+    return value;
+}
+
+static gp_Dir oriented_dir(const TopoDS_Face& face, const gp_Dir& dir) {
+    if (face.Orientation() == TopAbs_REVERSED) {
+        return gp_Dir(-dir.X(), -dir.Y(), -dir.Z());
+    }
+    return dir;
+}
+
+static std::string surface_classification_json(const TopoDS_Face& face) {
+    std::ostringstream js;
+
+    try {
+        BRepAdaptor_Surface adaptor(face, Standard_True);
+        const double firstU = adaptor.FirstUParameter();
+        const double lastU = adaptor.LastUParameter();
+        const double firstV = adaptor.FirstVParameter();
+        const double lastV = adaptor.LastVParameter();
+
+        switch (adaptor.GetType()) {
+            case GeomAbs_Plane: {
+                gp_Pln plane = adaptor.Plane();
+                js << "{\"kind\":\"plane\"";
+                js << ",\"origin\":";
+                append_vec3(js, plane.Location());
+                js << ",\"normal\":";
+                append_vec3(js, oriented_dir(face, plane.Axis().Direction()));
+                js << "}";
+                return js.str();
+            }
+
+            case GeomAbs_Cylinder: {
+                gp_Cylinder cylinder = adaptor.Cylinder();
+                js << "{\"kind\":\"cylinder\"";
+                js << ",\"axis_origin\":";
+                append_vec3(js, cylinder.Axis().Location());
+                js << ",\"axis_direction\":";
+                append_vec3(js, oriented_dir(face, cylinder.Axis().Direction()));
+                js << ",\"radius\":" << cylinder.Radius();
+                js << ",\"length\":" << positive_radius(lastV - firstV);
+                js << ",\"angular_span\":" << normalized_angle_span(lastU - firstU);
+                js << "}";
+                return js.str();
+            }
+
+            case GeomAbs_Cone: {
+                gp_Cone cone = adaptor.Cone();
+                const double tanHalfAngle = std::tan(cone.SemiAngle());
+                const double r1 = positive_radius(cone.RefRadius() + firstV * tanHalfAngle);
+                const double r2 = positive_radius(cone.RefRadius() + lastV * tanHalfAngle);
+                js << "{\"kind\":\"cone\"";
+                js << ",\"axis_origin\":";
+                append_vec3(js, cone.Axis().Location());
+                js << ",\"axis_direction\":";
+                append_vec3(js, oriented_dir(face, cone.Axis().Direction()));
+                js << ",\"half_angle\":" << cone.SemiAngle();
+                js << ",\"min_radius\":" << (r1 < r2 ? r1 : r2);
+                js << ",\"max_radius\":" << (r1 > r2 ? r1 : r2);
+                js << ",\"length\":" << positive_radius(lastV - firstV);
+                js << ",\"angular_span\":" << normalized_angle_span(lastU - firstU);
+                js << "}";
+                return js.str();
+            }
+
+            case GeomAbs_Sphere: {
+                gp_Sphere sphere = adaptor.Sphere();
+                js << "{\"kind\":\"sphere\"";
+                js << ",\"center\":";
+                append_vec3(js, sphere.Location());
+                js << ",\"radius\":" << sphere.Radius();
+                js << ",\"angular_span\":" << normalized_angle_span(lastU - firstU);
+                js << "}";
+                return js.str();
+            }
+
+            case GeomAbs_Torus: {
+                gp_Torus torus = adaptor.Torus();
+                js << "{\"kind\":\"torus\"";
+                js << ",\"axis_origin\":";
+                append_vec3(js, torus.Axis().Location());
+                js << ",\"axis_direction\":";
+                append_vec3(js, oriented_dir(face, torus.Axis().Direction()));
+                js << ",\"major_radius\":" << torus.MajorRadius();
+                js << ",\"minor_radius\":" << torus.MinorRadius();
+                js << ",\"angular_span\":" << normalized_angle_span(lastU - firstU);
+                js << "}";
+                return js.str();
+            }
+
+            case GeomAbs_BSplineSurface:
+                return "{\"kind\":\"b_spline\"}";
+
+            default:
+                return "{\"kind\":\"unknown\"}";
+        }
+    } catch (...) {
+        return "{\"kind\":\"unknown\"}";
+    }
 }
 
 // ── Deterministic ID generation ────────────────────────────────────────
@@ -265,6 +399,7 @@ static TopoResult* do_extract(const uint8_t* step_data, size_t step_len) {
         js << "{";
         js << "\"id\":" << json_string(faceIds[fi - 1]);
         js << ",\"index\":" << fi;
+        js << ",\"surface\":" << surface_classification_json(face);
 
         // Wire loops
         js << ",\"wires\":[";

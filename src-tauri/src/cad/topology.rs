@@ -8,6 +8,7 @@
 //! The C++ boundary is intentionally narrow — four C functions — as
 //! described in ADR 0003.
 
+use super::surfaces::SurfaceClassification;
 use serde::{Deserialize, Serialize};
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -46,6 +47,8 @@ pub struct TopoFace {
     pub id: String,
     /// 1-based index in the OCCT topology map.
     pub index: u32,
+    /// Analytic surface classification for this face.
+    pub surface: SurfaceClassification,
     /// Wire loops bounding this face (outer + inner/hole loops).
     pub wires: Vec<TopoWire>,
 }
@@ -97,9 +100,7 @@ fn extract_topology_from_bytes(step_bytes: &[u8]) -> Result<TopologyPayload, Str
         // Check for error
         let err_ptr = topo_result_error(result);
         if !err_ptr.is_null() {
-            let err_msg = CStr::from_ptr(err_ptr)
-                .to_string_lossy()
-                .into_owned();
+            let err_msg = CStr::from_ptr(err_ptr).to_string_lossy().into_owned();
             topo_result_free(result);
             return Err(err_msg);
         }
@@ -111,9 +112,7 @@ fn extract_topology_from_bytes(step_bytes: &[u8]) -> Result<TopologyPayload, Str
             return Err("Topology extraction produced no JSON output".to_string());
         }
 
-        let json_str = CStr::from_ptr(json_ptr)
-            .to_string_lossy()
-            .into_owned();
+        let json_str = CStr::from_ptr(json_ptr).to_string_lossy().into_owned();
         topo_result_free(result);
 
         // Deserialize
@@ -141,7 +140,9 @@ pub async fn extract_topology(step_bytes: Vec<u8>) -> Result<TopologyPayload, St
 
 #[cfg(test)]
 mod tests {
+    use super::super::surfaces::SurfaceKind;
     use super::*;
+    use std::collections::BTreeSet;
     use std::path::Path;
 
     fn fixture_path(name: &str) -> std::path::PathBuf {
@@ -157,16 +158,27 @@ mod tests {
 
     fn load_fixture(name: &str) -> Vec<u8> {
         let path = fixture_path(name);
-        std::fs::read(&path).unwrap_or_else(|e| {
-            panic!("Cannot read fixture {}: {e}", path.display())
-        })
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("Cannot read fixture {}: {e}", path.display()))
+    }
+
+    fn load_step_fixture(name: &str) -> Vec<u8> {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = Path::new(manifest_dir)
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join("fixtures")
+            .join("step")
+            .join(name);
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("Cannot read fixture {}: {e}", path.display()))
     }
 
     #[test]
     fn extract_pump_manifold() {
         let bytes = load_fixture("Pump Manifold v3.step");
-        let payload = extract_topology_from_bytes(&bytes)
-            .expect("extraction should succeed");
+        let payload = extract_topology_from_bytes(&bytes).expect("extraction should succeed");
 
         assert!(!payload.faces.is_empty(), "should have faces");
         assert!(!payload.edges.is_empty(), "should have edges");
@@ -191,8 +203,7 @@ mod tests {
     #[test]
     fn extract_locus_fixture() {
         let bytes = load_fixture("LOCUS SYSTEMS MACHINE FIXTURE.stp");
-        let payload = extract_topology_from_bytes(&bytes)
-            .expect("extraction should succeed");
+        let payload = extract_topology_from_bytes(&bytes).expect("extraction should succeed");
 
         assert!(!payload.faces.is_empty(), "should have faces");
         assert!(!payload.edges.is_empty(), "should have edges");
@@ -227,12 +238,102 @@ mod tests {
         let payload = extract_topology_from_bytes(&bytes).expect("extraction");
 
         let json = serde_json::to_string(&payload).expect("serialize");
-        let round_tripped: TopologyPayload =
-            serde_json::from_str(&json).expect("deserialize");
+        let round_tripped: TopologyPayload = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(payload.faces.len(), round_tripped.faces.len());
         assert_eq!(payload.edges.len(), round_tripped.edges.len());
         assert_eq!(payload.adjacency.len(), round_tripped.adjacency.len());
+    }
+
+    #[test]
+    fn classifies_analytic_surfaces_across_fixture_suite() {
+        let fixture_names = [
+            "FIXTURE PS_1250 ROUND BLOCKS.stp",
+            "LOCUS SYSTEMS MACHINE FIXTURE.stp",
+            "PS_1250_FIXTURE BLOCKS.stp",
+            "PS_8671_SINGLE CAVITY TRANSFER MOULD.stp",
+            "Pump Manifold v3.step",
+            "TEST BUTTON_9 CAVITY_29X12 (1).stp",
+        ];
+        let mut kinds = BTreeSet::new();
+
+        for fixture_name in fixture_names {
+            let bytes = load_fixture(fixture_name);
+            let payload = extract_topology_from_bytes(&bytes)
+                .unwrap_or_else(|e| panic!("{fixture_name} should extract topology: {e}"));
+
+            for face in payload.faces {
+                kinds.insert(face.surface.kind.clone());
+            }
+        }
+
+        assert!(
+            kinds.contains(&SurfaceKind::Plane),
+            "should classify planes"
+        );
+        assert!(
+            kinds.contains(&SurfaceKind::Cylinder),
+            "should classify cylinders"
+        );
+        assert!(kinds.contains(&SurfaceKind::Cone), "should classify cones");
+        assert!(
+            kinds.contains(&SurfaceKind::Sphere),
+            "should classify spheres"
+        );
+        assert!(kinds.contains(&SurfaceKind::Torus), "should classify tori");
+        assert!(
+            kinds.contains(&SurfaceKind::BSpline),
+            "should classify B-spline fallback surfaces"
+        );
+    }
+
+    #[test]
+    fn cylinder_parameters_are_normalized() {
+        let bytes = load_fixture("Pump Manifold v3.step");
+        let payload = extract_topology_from_bytes(&bytes).expect("extraction");
+        let cylinder = payload
+            .faces
+            .iter()
+            .find(|face| face.surface.kind == SurfaceKind::Cylinder)
+            .expect("fixture should contain at least one cylinder");
+
+        let axis = cylinder
+            .surface
+            .axis_direction
+            .expect("cylinder should include axis direction");
+        let axis_len = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        assert!(
+            (axis_len - 1.0).abs() < 0.001,
+            "axis should be unit length, got {axis_len}"
+        );
+        assert!(
+            cylinder.surface.radius.unwrap_or_default() > 0.0,
+            "cylinder radius should be positive"
+        );
+        assert!(
+            cylinder.surface.angular_span.unwrap_or_default() > 0.0,
+            "cylinder angular span should be positive"
+        );
+    }
+
+    #[test]
+    fn cylinder_radius_matches_nominal_cad_value() {
+        let bytes = load_step_fixture("self_round_shaft.step");
+        let payload = extract_topology_from_bytes(&bytes).expect("extraction");
+        let cylinder = payload
+            .faces
+            .iter()
+            .find(|face| face.surface.kind == SurfaceKind::Cylinder)
+            .expect("round shaft should contain a cylindrical side face");
+        let radius = cylinder
+            .surface
+            .radius
+            .expect("cylinder should include radius");
+
+        assert!(
+            (radius - 15.0).abs() <= 0.01,
+            "D30 shaft should have radius 15 mm, got {radius}"
+        );
     }
 
     #[test]
@@ -247,9 +348,6 @@ mod tests {
         assert!(result.is_err(), "invalid STEP should error");
         let err = result.unwrap_err();
         // Should be a readable message, not a panic
-        assert!(
-            !err.contains("panicked"),
-            "error should be readable: {err}"
-        );
+        assert!(!err.contains("panicked"), "error should be readable: {err}");
     }
 }

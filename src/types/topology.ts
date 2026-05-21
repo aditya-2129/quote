@@ -22,8 +22,36 @@ export interface TopoFace {
   id: string;
   /** 1-based index in the OCCT topology map. */
   index: number;
+  /** Analytic surface classification for this face. */
+  surface: SurfaceClassification;
   /** Wire loops bounding this face (outer + inner/hole loops). */
   wires: TopoWire[];
+}
+
+export type SurfaceKind =
+  | 'plane'
+  | 'cylinder'
+  | 'cone'
+  | 'sphere'
+  | 'torus'
+  | 'b_spline'
+  | 'unknown';
+
+export interface SurfaceClassification {
+  kind: SurfaceKind;
+  origin?: [number, number, number];
+  normal?: [number, number, number];
+  axis_origin?: [number, number, number];
+  axis_direction?: [number, number, number];
+  center?: [number, number, number];
+  radius?: number;
+  length?: number;
+  angular_span?: number;
+  half_angle?: number;
+  min_radius?: number;
+  max_radius?: number;
+  major_radius?: number;
+  minor_radius?: number;
 }
 
 /** A wire loop — an ordered sequence of edges forming a closed boundary. */
