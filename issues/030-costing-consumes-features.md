@@ -1,7 +1,8 @@
 # 030 — Costing engine consumes feature graph
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 1986d9d
 
 ## What to build
 

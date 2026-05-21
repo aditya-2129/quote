@@ -47,7 +47,7 @@ Run the narrowest meaningful check for code changes. For common changes, prefer 
 
 ## Logic Index
 
-- Quote costing: `src/utils/quoteCosting.ts`, `src/context/QuoteStateContext.tsx`
+- Quote costing: `src/utils/quoteCosting.ts`, `src/utils/costing/featureCost.ts` (per-feature cycle-time contributions with named mm³/min and mm/min rate constants; added on top of operation cycle time; parts without features behave identically to legacy), `src/context/QuoteStateContext.tsx`
 - Quote workspace: `src/pages/QuoteDetailPage.tsx` (layout orchestrator), `src/pages/QuoteDetail/` (sub-components)
 - PDF export: `src/utils/export.ts` (renderer), `src/utils/pdfAssembly.ts` (data assembly), `src/utils/fileSave.ts` (platform save)
 - CAD import: `src/utils/cad.ts`, `src/utils/cadWorker.ts`, `src/workers/occt.worker.ts`, `src/utils/occtOptions.ts` (shared options constant), `src/utils/geometryCache.ts` (SHA-256 + options-digest binary cache, hit skips the worker), `src/context/CadContext.tsx`, `src/components/ViewerWorkspace.tsx`

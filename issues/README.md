@@ -59,6 +59,7 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 027 | 79b57a3 | `detectBosses(graph)` in `src/utils/features/bosses.ts` detects round and rectangular protrusions from a base face; coexists with concentric holes; 6/6 unit tests |
 | 028 | 65b2711 | `part_features` SQLite table (migration 0013, registered as version 13 in lib.rs), Drizzle schema with discriminated `PartFeatureData` union, query helpers (`getFeaturesForPart`/`replaceFeaturesForPart`/`countFeatures`) with transactional replace, browser fallback; wiring points stubbed with TODOs in `quoteWorkflowService` |
 | 029 | a0ca938 | `analyzeAccessibility(features)` in `src/utils/manufacturing/accessibility.ts` returns `{maxAxisRequirement, setupCount, inaccessibleFeatures, approachDirectionsPerFeature}` via greedy set-cover over feature approach directions; classifies lathe / 3/4/5-axis / mill-turn / not-machinable; 9/9 unit tests |
+| 030 | 1986d9d | `featureCycleMinutes()` in `src/utils/costing/featureCost.ts` adds per-feature cycle time on top of operation cost (drill/tap/pocket/slot/fillet/chamfer with named mm³-per-min and mm-per-min rate constants); legacy parts without features remain byte-identical to today; 16 new tests, all 103 golden tests still green |
 
 ## Suggested execution order
 
