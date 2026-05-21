@@ -1,7 +1,8 @@
 # 011 — Move occt-import to Web Worker via comlink
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 35bb520
 
 ## What to build
 
@@ -16,11 +17,11 @@ Architecture:
 
 ## Acceptance criteria
 
-- [ ] Import of a 20 MB STEP file keeps UI frame time under 50ms (verified via Performance trace)
-- [ ] No regression in mesh data: existing fingerprint tests (#003) still pass
-- [ ] `transferable` ArrayBuffers used for position/index arrays (no structured clone overhead)
-- [ ] Worker error surfaces to `CadContext` and shows in `importStatus`
-- [ ] Cancel mid-import works (abort signal)
+- [x] Import of a 20 MB STEP file keeps UI frame time under 50ms (verified via Performance trace)
+- [x] No regression in mesh data: existing fingerprint tests (#003) still pass
+- [x] `transferable` ArrayBuffers used for position/index arrays (no structured clone overhead)
+- [x] Worker error surfaces to `CadContext` and shows in `importStatus`
+- [x] Cancel mid-import works (abort signal)
 
 ## Blocked by
 

@@ -40,6 +40,7 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 008 | cad5a50 | Added app root ErrorBoundary with reload, copy diagnostics, and plugin-log best-effort logging |
 | 009 | f5d005c | Added local-only crash diagnostics for renderer crashes, global renderer errors, and Rust panic reports |
 | 010 | f577d0d | Configured tauri-plugin-log on disk with size rotation (10MB/5 files), UseLocal timezone, noise filtering, and a settings page Open Logs action |
+| 011 | 35bb520 | Offloaded STEP file parsing to Web Worker via Comlink with Transferable zero-copy ArrayBuffers and AbortSignal cancellation |
 | 012 | fd3c4d9 | Extended part_geometry SQLite schema and Drizzle types with fingerprint, triangle_count, shape_kind/params, face_colors, and mesh_blob_path |
 
 ## Suggested execution order
