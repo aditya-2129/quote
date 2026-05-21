@@ -1,7 +1,8 @@
 # 019 - JS-side TopologyGraph and FaceClass types
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 7d564ef
 
 ## What to build
 

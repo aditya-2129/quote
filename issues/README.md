@@ -45,6 +45,11 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 013 | c958d83 | SHA-256 + OCCT-options-digest keyed binary geometry cache that skips the worker on hit; surfaced via Settings -> Diagnostics with hit/miss/clear controls |
 | 014 | 8a8e534 | Large CAD source binary blobs (>5 MB) offloaded from SQLite to local file-based store with automatic deduplication, startup migration, and orphan cleanup |
 | 015 | 51522db | Windows OCCT binding spike rejected direct opencascade-rs/occt-wasm adoption and chose a narrow custom OCCT C++ shim for Phase 2 |
+| 016 | ba15c66 | Native OCCT topology extraction via narrow C++ shim (vcpkg); `extract_topology` Tauri command returning faces/edges/adjacency/wire loops with stable IDs |
+| 017 | 59c8bf5 | Analytic surface classification (plane/cylinder/cone/sphere/torus/b-spline) with exact params attached to each face via `BRepAdaptor_Surface` |
+| 018 | 46252c9 | Versioned topology envelope (`{version, topology}`) with serde + JSON schema, `topology_payload_schema` command, JS parse/serialize helpers |
+| 019 | 7d564ef | JS `TopologyGraph`, `FaceClass`/`EdgeClass` discriminated unions, `findFacesByClass`/`neighborsOf`/`wireLoopsOf` helpers with graceful undefined handling |
+| 020 | d70223f | `analyzeShape()` prefers topology when available (exact cylinder + hex dimensions), falls back to mesh heuristic; path logged via `console.debug` |
 
 ## Suggested execution order
 

@@ -1,7 +1,8 @@
 # 017 - Rust analytic surface classification
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 59c8bf5
 
 ## What to build
 

@@ -1,7 +1,8 @@
 # 018 - JSON serialization Rust-JS for topology payload
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 46252c9
 
 ## What to build
 

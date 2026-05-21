@@ -1,7 +1,8 @@
 # 020 - Migrate shapeAnalysis to topology with mesh fallback
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: d70223f
 
 ## What to build
 

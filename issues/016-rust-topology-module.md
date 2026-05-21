@@ -1,7 +1,8 @@
 # 016 - Rust topology module: face/edge/wire extraction
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: ba15c66
 
 ## What to build
 
