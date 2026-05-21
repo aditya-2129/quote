@@ -1,7 +1,8 @@
 # 014 — Large STEP blob → file-based store
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: 8a8e534
 
 ## What to build
 
@@ -11,11 +12,11 @@ Files smaller than 5 MB stay inline (avoid file-system overhead for tiny parts).
 
 ## Acceptance criteria
 
-- [ ] Migration moves existing >5 MB blobs to disk
-- [ ] New imports route automatically based on size threshold
-- [ ] Orphan cleanup: on quote delete, blob file is removed
-- [ ] File missing on disk falls back to re-import flow gracefully (no crash)
-- [ ] DB size reduced on a test corpus of large quotes (verify in logs)
+- [x] Migration moves existing >5 MB blobs to disk
+- [x] New imports route automatically based on size threshold
+- [x] Orphan cleanup: on quote delete, blob file is removed
+- [x] File missing on disk falls back to re-import flow gracefully (no crash)
+- [x] DB size reduced on a test corpus of large quotes (verify in logs)
 
 ## Blocked by
 
