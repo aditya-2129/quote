@@ -1,7 +1,8 @@
 # 012 — Extend part_geometry schema with fingerprint and classification cache
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: fd3c4d9
 
 ## What to build
 
@@ -18,11 +19,11 @@ Drizzle migration generated and committed. Existing rows backfilled with NULLs.
 
 ## Acceptance criteria
 
-- [ ] Schema migrated cleanly on a fresh DB
-- [ ] Existing app data migrates without loss
-- [ ] `npm run db:generate` produces a clean migration
-- [ ] Drizzle types regenerated and consumers updated
-- [ ] No runtime errors on existing quotes after migration
+- [x] Schema migrated cleanly on a fresh DB
+- [x] Existing app data migrates without loss
+- [x] `npm run db:generate` produces a clean migration
+- [x] Drizzle types regenerated and consumers updated
+- [x] No runtime errors on existing quotes after migration
 
 ## Blocked by
 
