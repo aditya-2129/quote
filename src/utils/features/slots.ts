@@ -146,6 +146,7 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
           ]),
         ),
       });
+      break;
     }
   }
 
