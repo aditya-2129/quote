@@ -508,15 +508,32 @@ export const browserDb = {
     const db = readDb();
     const index = db.quoteCadSources.findIndex(row => row.quoteId === data.quoteId);
     if (index >= 0) {
-      db.quoteCadSources[index] = { ...db.quoteCadSources[index]!, ...data };
+      db.quoteCadSources[index] = Object.assign(
+        {
+          fileBytesBase64: null,
+          filePath: null,
+          fileSize: null,
+          sha256: null,
+        },
+        db.quoteCadSources[index]!,
+        data
+      );
       writeDb(db);
       return db.quoteCadSources[index]!;
     }
-    const row: QuoteCadSource = {
-      ...data,
-      id: newId("cadsrc"),
-      importedAt: now(),
-    };
+    const row: QuoteCadSource = Object.assign(
+      {
+        fileBytesBase64: null,
+        filePath: null,
+        fileSize: null,
+        sha256: null,
+      },
+      data,
+      {
+        id: newId("cadsrc"),
+        importedAt: now(),
+      }
+    );
     db.quoteCadSources.push(row);
     writeDb(db);
     return row;

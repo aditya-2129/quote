@@ -18,9 +18,16 @@ import {
   SettingsPage,
 } from "@pages/index";
 import { installGlobalCrashReportListeners } from "@utils/crashReports";
+import { migrateExistingBlobsToDisk } from "@utils/cadSourceStore";
 
 function CrashReportListeners() {
-  useEffect(() => installGlobalCrashReportListeners(), []);
+  useEffect(() => {
+    installGlobalCrashReportListeners();
+    // Run the CAD source blob disk migration in background on startup
+    migrateExistingBlobsToDisk().catch((err) => {
+      console.error("[App] Failed to run CAD blob store migration on startup:", err);
+    });
+  }, []);
   return null;
 }
 

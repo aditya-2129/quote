@@ -257,8 +257,11 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
       // attach new CAD bytes and we mustn't overwrite them with the old saved
       // ones. The next save will overwrite the row with the user's choice.
       const handoffPending = pendingHandoffRef.current;
-      if (current?.fileName !== snapshot.cadSource.fileName && !handoffPending) {
-        void restoreFromBytes(snapshot.cadSource.bytes, snapshot.cadSource.fileName);
+      const hasMeshParts = snapshot.parts.some(p => p.meshIds && p.meshIds.length > 0);
+      const missingGeometry = snapshot.parts.some(p => p.meshIds && p.meshIds.length > 0 && !p.geometry);
+      const forceReimport = hasMeshParts && missingGeometry;
+      if ((current?.fileName !== snapshot.cadSource.fileName || forceReimport) && !handoffPending) {
+        void restoreFromBytes(snapshot.cadSource.bytes, snapshot.cadSource.fileName, forceReimport);
       }
     } else {
       lastSavedCadFileRef.current = null;

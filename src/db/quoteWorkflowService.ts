@@ -23,7 +23,6 @@ import {
   getPartStock,
   getQuoteById,
   getQuoteBopsByQuote,
-  getQuoteCadSource,
   getQuoteExtraCostsByQuote,
   getRootQuotes,
   getRfqById,
@@ -34,9 +33,9 @@ import {
   updateRfq,
   upsertPartGeometry,
   upsertPartStock,
-  upsertQuoteCadSource,
   upsertQuoteExtraCost,
 } from "./queries";
+import { storeCadSource, loadCadSource, deleteCadSourceFile } from "../utils/cadSourceStore";
 import { QUOTE_EXTRA_COST_ROSTER } from "./schema";
 import type {
   PartGeometry,
@@ -165,22 +164,7 @@ function cleanTitle(project: string | undefined): string {
   return title ? title : "Untitled quote";
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  // Chunked to keep String.fromCharCode under the call-stack limit for multi-MB files.
-  const CHUNK = 0x8000;
-  let s = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
-  }
-  return btoa(s);
-}
 
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
 
 function finiteNumber(value: number | undefined, fallback = 0): number {
   return value !== undefined && Number.isFinite(value) ? value : fallback;
@@ -597,11 +581,7 @@ export async function saveQuoteWorkflow(
   }
 
   if (draft.cadSource && draft.cadSource.bytes.length > 0) {
-    await upsertQuoteCadSource({
-      quoteId: quote.id,
-      fileName: draft.cadSource.fileName,
-      fileBytesBase64: bytesToBase64(draft.cadSource.bytes),
-    });
+    await storeCadSource(quote.id, draft.cadSource.fileName, draft.cadSource.bytes);
   }
 
   return {
@@ -657,10 +637,7 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     };
   });
 
-  const cadSourceRow = await getQuoteCadSource(quote.id);
-  const cadSource: QuoteWorkflowCadSource | null = cadSourceRow
-    ? { bytes: base64ToBytes(cadSourceRow.fileBytesBase64), fileName: cadSourceRow.fileName }
-    : null;
+  const cadSource = await loadCadSource(quote.id);
 
   return {
     quoteId: quote.id,
@@ -707,6 +684,7 @@ export async function deleteQuoteWorkflowChildren(quoteId: string): Promise<void
 
 export async function deleteQuoteWorkflow(quoteId: string): Promise<void> {
   const quote = await getQuoteById(quoteId);
+  await deleteCadSourceFile(quoteId);
   await deleteQuoteWorkflowChildren(quoteId);
   await deleteQuote(quoteId);
   if (quote?.rfqId) {
