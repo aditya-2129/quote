@@ -1,7 +1,8 @@
 # 010 — tauri-plugin-log to disk with rotation
 
 **Type:** AFK
-Status: ready-for-agent
+Status: done
+Completed in: f577d0d
 
 ## What to build
 
@@ -9,12 +10,12 @@ Configure `tauri-plugin-log` (already a Cargo dependency) to write to disk under
 
 ## Acceptance criteria
 
-- [ ] Logs persist between app launches under app-data dir
-- [ ] Rotation kicks in at configured size
-- [ ] Old log files cleaned up beyond retention count
-- [ ] "Open logs folder" menu item works on Windows
-- [ ] Log format includes timestamp + level + module
-- [ ] No log spam at INFO level during idle
+- [x] Logs persist between app launches under app-data dir
+- [x] Rotation kicks in at configured size
+- [x] Old log files cleaned up beyond retention count
+- [x] "Open logs folder" menu item works on Windows
+- [x] Log format includes timestamp + level + module
+- [x] No log spam at INFO level during idle
 
 ## Blocked by
 
