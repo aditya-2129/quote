@@ -1,4 +1,4 @@
-import * as Comlink from 'comlink';
+﻿import * as Comlink from 'comlink';
 
 type BrepFace = {
   first: number;
@@ -23,13 +23,6 @@ type OcctNode = {
   meshes?: number[];
 };
 
-export interface OcctImportOptions {
-  linearUnit?: 'millimeter' | 'inch';
-  linearDeflectionType?: 'bounding_box_ratio' | 'absolute';
-  linearDeflection?: number;
-  angularDeflection?: number;
-}
-
 export interface SerializableMesh {
   name?: string;
   color?: number[];
@@ -48,17 +41,17 @@ export interface WorkerImportResult {
 }
 
 export const occtWorkerApi = {
-  async importStep(buffer: Uint8Array, options?: OcctImportOptions): Promise<WorkerImportResult> {
+  async importStep(buffer: Uint8Array): Promise<WorkerImportResult> {
     try {
       const { default: occtimportjs } = await import('occt-import-js');
       const occt = await occtimportjs({
         locateFile: (path) => '/' + path,
       });
       const result = occt.ReadStepFile(buffer, {
-        linearUnit: options?.linearUnit ?? 'millimeter',
-        linearDeflectionType: options?.linearDeflectionType ?? 'bounding_box_ratio',
-        linearDeflection: options?.linearDeflection ?? 0.001,
-        angularDeflection: options?.angularDeflection ?? 0.5,
+        linearUnit: 'millimeter',
+        linearDeflectionType: 'bounding_box_ratio',
+        linearDeflection: 0.001,
+        angularDeflection: 0.5,
       });
 
       if (!result.success || !Array.isArray(result.meshes)) {

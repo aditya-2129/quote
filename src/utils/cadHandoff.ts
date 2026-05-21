@@ -1,6 +1,6 @@
 import type { CadImportResult } from "./cad";
 import type { Part, Stock } from "./quoteTypes";
-import { groupIdenticalMeshes, computeFingerprintHash } from "./meshFingerprint";
+import { groupIdenticalMeshes } from "./meshFingerprint";
 import { analyzeShape, computeMeshStats } from "./shapeAnalysis";
 
 function stockFromGeometry(geometry: import("three").BufferGeometry): Stock {
@@ -30,10 +30,8 @@ export function cadResultToParts(cad: CadImportResult): Part[] {
   );
   return groups.map(({ representativeId, meshIds }) => {
     const rep = byId.get(representativeId)!;
-    const shape = analyzeShape(rep.geometry);
     const stock = stockFromGeometry(rep.geometry);
     const stats = computeMeshStats(rep.geometry);
-    const fingerprintHash = computeFingerprintHash(rep.geometry);
     return {
       id: rep.id,
       name: meshIds.length > 1 ? `${rep.name} × ${meshIds.length}` : rep.name,
@@ -48,23 +46,6 @@ export function cadResultToParts(cad: CadImportResult): Part[] {
       stock,
       operations: [],
       meshIds,
-      geometry: {
-        fileName: cad.fileName,
-        unitSystem: "metric" as const,
-        bboxXMm: stats.boundingBoxMm.x,
-        bboxYMm: stats.boundingBoxMm.y,
-        bboxZMm: stats.boundingBoxMm.z,
-        volumeMm3: stats.volumeMm3,
-        surfaceAreaMm2: stats.surfaceAreaMm2,
-        faceCount: stats.triangleCount,
-        vertexCount: stats.vertexCount,
-        fingerprintHash,
-        triangleCount: stats.triangleCount,
-        shapeKind: shape.kind,
-        shapeParams: JSON.stringify(shape),
-        faceColors: rep.faceColors ? JSON.stringify(rep.faceColors) : null,
-        meshBlobPath: rep.meshBlobPath || null,
-      },
     };
   });
 }

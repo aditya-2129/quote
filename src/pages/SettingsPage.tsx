@@ -20,7 +20,6 @@ import { getAllSettings, setSetting } from "../db/queries";
 import type { AppSettingKey } from "../db/schema";
 import { isTauriRuntime } from "../utils/tauriRuntime";
 import { getLatestCrashReportText, openCrashReportsFolder, writeTestRustCrashReport, openLogsFolder } from "../utils/crashReports";
-import { getCacheStats, clearGeometryCache } from "../utils/geometryCache";
 
 type SettingsForm = {
   unitSystem: "metric" | "imperial";
@@ -972,7 +971,6 @@ function HistorySettings({
 
 function DiagnosticsSettings() {
   const [status, setStatus] = useState("");
-  const [stats, setStats] = useState(() => getCacheStats());
 
   const copyLatestReport = async () => {
     try {
@@ -1015,34 +1013,10 @@ function DiagnosticsSettings() {
     }
   };
 
-  const handleClearCache = async () => {
-    try {
-      await clearGeometryCache();
-      setStats(getCacheStats());
-      setStatus("Geometry cache cleared successfully.");
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Failed to clear geometry cache.");
-    }
-  };
-
   return (
     <section className="settings-pane">
       <h2>Diagnostics</h2>
       <div className="settings-group">
-        <div className="settings-control-row">
-          <div>
-            <div className="settings-control-title">Geometry cache</div>
-            <div className="settings-control-help">
-              Speeds up STEP file imports. Hits: {stats.hits} · Misses: {stats.misses} · Hit Ratio: {stats.ratio.toFixed(1)}%
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button className="btn sm" type="button" onClick={handleClearCache}>
-              Clear cache
-            </button>
-          </div>
-        </div>
-
         <div className="settings-control-row">
           <div>
             <div className="settings-control-title">Crash reports</div>

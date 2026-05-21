@@ -399,15 +399,6 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             <div className="canvas-hud-top">
               <span className="pill"><Box size={11} /> {cad.fileName}</span>
               <span className="pill">{cad.meshes.length} bodies</span>
-              {cad.cacheStatus && (
-                <span className="pill" style={{
-                  backgroundColor: cad.cacheStatus === "hit" ? "var(--success-bg, #d1fae5)" : "var(--danger-bg, #fee2e2)",
-                  color: cad.cacheStatus === "hit" ? "var(--success-text, #065f46)" : "var(--danger-text, #991b1b)",
-                  fontWeight: 600,
-                }}>
-                  Cache {cad.cacheStatus}
-                </span>
-              )}
             </div>
           </div>
         ) : (

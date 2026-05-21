@@ -14,7 +14,7 @@ interface CadCtx {
   /** Raw STEP bytes for the current import — used by the quote workflow to persist source CAD per quote. */
   getCadBytes: () => { bytes: Uint8Array; fileName: string } | null;
   /** Re-import a STEP file from its raw bytes (used to restore after a quote reload). */
-  restoreFromBytes: (bytes: Uint8Array, fileName: string, forceReimport?: boolean) => Promise<void>;
+  restoreFromBytes: (bytes: Uint8Array, fileName: string) => Promise<void>;
   /** Clear in-memory CAD state (used when navigating to a quote that has no source). */
   clearCad: () => void;
   cancelImport: () => void;
@@ -95,7 +95,7 @@ export function CadProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const restoreFromBytes = useCallback(async (bytes: Uint8Array, fileName: string, forceReimport?: boolean) => {
+  const restoreFromBytes = useCallback(async (bytes: Uint8Array, fileName: string) => {
     setIsImporting(true);
     setStatus(`Restoring ${fileName}`);
 
@@ -106,7 +106,7 @@ export function CadProvider({ children }: { children: ReactNode }) {
     activeAbortControllerRef.current = controller;
 
     try {
-      const result = await importStepBytes(fileName, bytes, controller.signal, undefined, forceReimport);
+      const result = await importStepBytes(fileName, bytes, controller.signal);
       cadBytesRef.current = { bytes, fileName };
       setCad(result);
       setStatus("STEP geometry restored");

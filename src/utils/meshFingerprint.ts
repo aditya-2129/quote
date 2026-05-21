@@ -152,15 +152,3 @@ export function groupIdenticalMeshes(
   groups.sort((a, b) => (order.get(a.representativeId)! - order.get(b.representativeId)!));
   return groups;
 }
-
-export function computeFingerprintHash(geo: THREE.BufferGeometry): string {
-  const d = sortedRadialDistances(geo);
-  if (d.length === 0) return "";
-  const rounded = Array.from(d).map(v => Math.round(v * 1000) / 1000);
-  const dataString = `${geo.getAttribute("position").count}|${rounded.join(",")}`;
-  let hash = 5381;
-  for (let i = 0; i < dataString.length; i++) {
-    hash = (hash * 33) ^ dataString.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(16);
-}
