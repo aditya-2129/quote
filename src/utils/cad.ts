@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { importStep } from "./cadWorker";
+import type { SerializableMesh } from "../workers/occt.worker";
 import type { StepGeometryInput } from "../types";
 
 type BrepFace = {
@@ -146,30 +148,59 @@ type OcctGeometryResult = {
   faceColors: string[];
 };
 
-function geometryFromOcctMesh(mesh: OcctMesh): OcctGeometryResult | null {
-  const positions = mesh.attributes?.position?.array;
-  const indexes = mesh.index?.array;
+function geometryFromOcctMesh(mesh: OcctMesh | SerializableMesh): OcctGeometryResult | null {
+  let positions: number[] | Float32Array | undefined;
+  let indexes: number[] | Uint32Array | undefined;
+  let normals: number[] | Float32Array | undefined;
+
+  if ("positions" in mesh) {
+    positions = mesh.positions;
+    indexes = mesh.indexes;
+    normals = mesh.normals;
+  } else {
+    positions = mesh.attributes?.position?.array;
+    indexes = mesh.index?.array;
+    normals = mesh.attributes?.normal?.array;
+  }
 
   if (!positions || positions.length < 9) {
     return null;
   }
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3),
-  );
-
-  if (indexes && indexes.length >= 3) {
-    geometry.setIndex(indexes);
+  
+  if (positions instanceof Float32Array) {
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3),
+    );
+  } else {
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
   }
 
-  const normals = mesh.attributes?.normal?.array;
+  if (indexes && indexes.length >= 3) {
+    if (indexes instanceof Uint32Array) {
+      geometry.setIndex(new THREE.BufferAttribute(indexes, 1));
+    } else {
+      geometry.setIndex(indexes);
+    }
+  }
+
   if (normals && normals.length === positions.length) {
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(normals, 3),
-    );
+    if (normals instanceof Float32Array) {
+      geometry.setAttribute(
+        "normal",
+        new THREE.BufferAttribute(normals, 3),
+      );
+    } else {
+      geometry.setAttribute(
+        "normal",
+        new THREE.Float32BufferAttribute(normals, 3),
+      );
+    }
   } else {
     geometry.computeVertexNormals();
   }
@@ -337,22 +368,14 @@ export async function importStepUrl(
 export async function importStepBytes(
   fileName: string,
   buffer: Uint8Array,
+  signal?: AbortSignal,
 ): Promise<CadImportResult> {
   const isStep = /\.(step|stp)$/i.test(fileName);
   if (!isStep) {
     throw new Error("Upload a .step or .stp CAD file.");
   }
 
-  const { default: occtimportjs } = await import("occt-import-js");
-  const occt = await occtimportjs({
-    locateFile: (path) => `/${path}`,
-  });
-  const result = occt.ReadStepFile(buffer, {
-    linearUnit: "millimeter",
-    linearDeflectionType: "bounding_box_ratio",
-    linearDeflection: 0.001,
-    angularDeflection: 0.5,
-  });
+  const result = await importStep(buffer, fileName, signal);
 
   if (!result.success || !Array.isArray(result.meshes)) {
     throw new Error(
@@ -360,20 +383,20 @@ export async function importStepBytes(
     );
   }
 
-  const sourceMeshes = result.meshes as OcctMesh[];
+  const sourceMeshes = result.meshes as SerializableMesh[];
   const meshes = sourceMeshes
-    .map((mesh, index) => {
+    .map((mesh) => {
       const geo = geometryFromOcctMesh(mesh);
       if (!geo) {
         return null;
       }
 
       return createCadMesh(
-        `part-${index}`,
-        mesh.name?.trim() || `Part ${index + 1}`,
+        `part-${mesh.occtIndex}`,
+        mesh.name?.trim() || `Part ${mesh.occtIndex + 1}`,
         geo.geometry,
         colorToHex(mesh.color),
-        index,
+        mesh.occtIndex,
         geo.faceColors.length > 0 ? geo.faceColors : undefined,
       );
     })

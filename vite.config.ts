@@ -18,6 +18,9 @@ export default defineConfig({
       "@context": path.resolve(__dirname, "./src/context"),
     },
   },
+  worker: {
+    format: 'es',
+  },
   // Prevent vite from obscuring Rust errors
   clearScreen: false,
   // Tauri expects a fixed port, fail if that port is not available
