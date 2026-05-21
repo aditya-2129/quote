@@ -50,7 +50,7 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 018 | 46252c9 | Versioned topology envelope (`{version, topology}`) with serde + JSON schema, `topology_payload_schema` command, JS parse/serialize helpers |
 | 019 | 7d564ef | JS `TopologyGraph`, `FaceClass`/`EdgeClass` discriminated unions, `findFacesByClass`/`neighborsOf`/`wireLoopsOf` helpers with graceful undefined handling |
 | 020 | d70223f | `analyzeShape()` prefers topology when available (exact cylinder + hex dimensions), falls back to mesh heuristic; path logged via `console.debug` |
-| 021 | pending | `detectHoles(graph)` in `src/utils/features/holes.ts` classifies coaxial cylinder/cone groups into through/blind/counterbore/countersink with chain merging; 10/10 unit tests; 50-hole perf well under 100 ms |
+| 021 | 7215ab4 | `detectHoles(graph)` in `src/utils/features/holes.ts` classifies coaxial cylinder/cone groups into through/blind/counterbore/countersink with chain merging; 10/10 unit tests; 50-hole perf well under 100 ms |
 
 ## Suggested execution order
 
