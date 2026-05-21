@@ -32,9 +32,9 @@ Local drafts can later be copied into GitHub Issues.
 
 ## Current Local Roadmap
 
-The enterprise CAD intelligence roadmap is tracked locally until it is ready to publish:
+The CAD dimension-correctness roadmap is tracked locally until it is ready to publish:
 
-- Plan: `plans/enterprise-cad-roadmap.md`
+- Plan: `plans/dimension-correctness-roadmap.md`
 - Local issue index: `issues/README.md`
 - Issue status mapping: `AFK` -> `ready-for-agent`, `HITL` -> `ready-for-human`
 
