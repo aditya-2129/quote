@@ -2,7 +2,7 @@
 
 **Type:** AFK
 Status: done
-Completed in: 532cbaa
+Completed in: 532cbaa (follow-up: register migration 10 in `src-tauri/src/lib.rs`)
 
 ## What to build
 

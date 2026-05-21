@@ -40,7 +40,7 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 - `src/db/schema/` defines normalized tables for RFQs, quotes, parts, geometry, stock, operations, BOP catalog, quote BOP rows, materials, machines, customers, DFM issues, notifications, settings, and recent files.
 - `src/db/queries/` has table-scoped CRUD helpers.
 - `src/db/quoteWorkflowService.ts` bridges the React quote draft to normalized RFQ/quote/part/BOP tables and computes persisted cost snapshots.
-- `src-tauri/migrations/` contains native SQLite migrations. Keep it in sync with `src/db/schema/`.
+- `src-tauri/migrations/` contains native SQLite migrations. Keep it in sync with `src/db/schema/`. **Every new `NNNN_*.sql` file must also be registered in the `migrations` vec in `src-tauri/src/lib.rs` — the Rust runner only applies what's listed there, so a file on disk alone is a silent no-op.**
 
 ## Design Surface
 

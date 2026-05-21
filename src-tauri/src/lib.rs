@@ -250,6 +250,12 @@ pub fn run() {
             sql: include_str!("../migrations/0009_quote_extra_costs.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "drop_edge_count",
+            sql: include_str!("../migrations/0010_drop_edge_count.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
