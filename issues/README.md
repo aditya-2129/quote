@@ -42,6 +42,7 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 010 | f577d0d | Configured tauri-plugin-log on disk with size rotation (10MB/5 files), UseLocal timezone, noise filtering, and a settings page Open Logs action |
 | 011 | 35bb520 | Offloaded STEP file parsing to Web Worker via Comlink with Transferable zero-copy ArrayBuffers and AbortSignal cancellation |
 | 012 | fd3c4d9 | Extended part_geometry SQLite schema and Drizzle types with fingerprint, triangle_count, shape_kind/params, face_colors, and mesh_blob_path |
+| 013 | c958d83 | SHA-256 + OCCT-options-digest keyed binary geometry cache that skips the worker on hit; surfaced via Settings -> Diagnostics with hit/miss/clear controls |
 | 014 | 8a8e534 | Large CAD source binary blobs (>5 MB) offloaded from SQLite to local file-based store with automatic deduplication, startup migration, and orphan cleanup |
 
 ## Suggested execution order
