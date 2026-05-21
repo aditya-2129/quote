@@ -2,6 +2,7 @@
 
 **Type:** HITL
 Status: done
+Completed in: 51522db
 
 ## What to build
 

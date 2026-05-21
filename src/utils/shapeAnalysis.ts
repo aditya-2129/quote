@@ -106,7 +106,7 @@ export function analyzeShape(
     yMm: size.y,
     zMm: size.z,
   };
-  const topologyResult = analyzeTopologyShape(topology, boxFallback);
+  const topologyResult = analyzeTopologyShape(topology);
   if (topologyResult) {
     console.debug("[shapeAnalysis] path=topology");
     return topologyResult;
@@ -157,7 +157,6 @@ export function analyzeShape(
 
 function analyzeTopologyShape(
   topology: TopologyGraph | undefined,
-  boxFallback: ShapeAnalysis,
 ): ShapeAnalysis | null {
   if (!topology) return null;
 
@@ -174,17 +173,14 @@ function analyzeTopologyShape(
       kind: "cylinder",
       outerDiaMm: dominant.radius * 2,
       innerDiaMm: inner ? inner.radius * 2 : null,
-      lengthMm:
-        dominant.length && dominant.length > 0
-          ? dominant.length
-          : longestBoxDim(boxFallback),
+      lengthMm: dominant.length && dominant.length > 0 ? dominant.length : 0,
     };
   }
 
   const hex = classifyTopologyHex(topology);
   if (hex) return hex;
 
-  return boxFallback;
+  return null;
 }
 
 function cylinderScore(face: Extract<FaceClass, { kind: "cylinder" }>): number {
@@ -278,11 +274,6 @@ function topologyLengthFromPlaneCaps(
   if (capDistances.length < 2) return null;
 
   return Math.max(...capDistances) - Math.min(...capDistances);
-}
-
-function longestBoxDim(shape: ShapeAnalysis): number {
-  if (shape.kind !== "box") return 0;
-  return Math.max(shape.xMm, shape.yMm, shape.zMm);
 }
 
 function dot3(

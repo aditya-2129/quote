@@ -239,6 +239,28 @@ describe("analyzeShape topology path", () => {
     expect(debugSpy).toHaveBeenCalledWith("[shapeAnalysis] path=mesh");
     debugSpy.mockRestore();
   });
+
+  it("falls back to mesh path when topology has no cylinder or hex classification", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const topology = buildTopologyGraph({
+      faces: [
+        {
+          id: "f_spline",
+          index: 1,
+          surface: { kind: "b_spline" },
+          wires: [],
+        },
+      ],
+      edges: [],
+      adjacency: [],
+    });
+
+    const result = analyzeShape(boxGeometry(12, 24, 36), topology);
+
+    expect(result).toEqual({ kind: "box", xMm: 12, yMm: 24, zMm: 36 });
+    expect(debugSpy).toHaveBeenCalledWith("[shapeAnalysis] path=mesh");
+    debugSpy.mockRestore();
+  });
 });
 
 function cylinderFace(
