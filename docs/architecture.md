@@ -22,6 +22,7 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 - `src/components/ViewerWorkspace.tsx` composes the viewer, tree, toolbar, and inspector.
 - `src/utils/cadHandoff.ts` converts CAD meshes to quote parts.
 - `src/utils/meshFingerprint.ts` groups identical bodies before quote row creation.
+- `src/utils/shapeAnalysis.ts` keeps its mesh-only call path for legacy consumers, and can optionally accept a `TopologyGraph` to prefer exact topology classification before falling back to the existing mesh histogram heuristic. It logs `[shapeAnalysis] path=topology` or `[shapeAnalysis] path=mesh` for debugging.
 
 ## Quote Flow
 

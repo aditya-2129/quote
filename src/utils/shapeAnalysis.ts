@@ -1,19 +1,29 @@
 import * as THREE from "three";
+import {
+  findFacesByClass,
+  type FaceClass,
+  type TopologyGraph,
+} from "./topology";
 
 export type ShapeAnalysis =
-  | { kind: "cylinder"; outerDiaMm: number; innerDiaMm: number | null; lengthMm: number }
+  | {
+      kind: "cylinder";
+      outerDiaMm: number;
+      innerDiaMm: number | null;
+      lengthMm: number;
+    }
   | { kind: "hex"; afMm: number; lengthMm: number }
   | { kind: "box"; xMm: number; yMm: number; zMm: number };
 
 type TriangleData = {
-  n: [number, number, number];  // unit normal (x, y, z)
-  c: [number, number, number];  // centroid relative to bbCenter (x, y, z)
+  n: [number, number, number]; // unit normal (x, y, z)
+  c: [number, number, number]; // centroid relative to bbCenter (x, y, z)
   area: number;
 };
 
 type SideFace = {
-  angle: number;     // normal direction in cross-section plane (atan2)
-  perpDist: number;  // signed perpendicular distance from axis to face plane along normal
+  angle: number; // normal direction in cross-section plane (atan2)
+  perpDist: number; // signed perpendicular distance from axis to face plane along normal
   area: number;
 };
 
@@ -42,7 +52,11 @@ export function computeMeshStats(geo: THREE.BufferGeometry): MeshStats {
 
   const pos = geo.attributes.position;
   const idx = geo.index;
-  const triCount = pos ? (idx ? Math.floor(idx.count / 3) : Math.floor(pos.count / 3)) : 0;
+  const triCount = pos
+    ? idx
+      ? Math.floor(idx.count / 3)
+      : Math.floor(pos.count / 3)
+    : 0;
 
   let surfaceAreaMm2 = 0;
   let volumeMm3 = 0;
@@ -53,7 +67,7 @@ export function computeMeshStats(geo: THREE.BufferGeometry): MeshStats {
   const cross = new THREE.Vector3();
 
   for (let t = 0; t < triCount; t++) {
-    const a = idx ? idx.getX(t * 3)     : t * 3;
+    const a = idx ? idx.getX(t * 3) : t * 3;
     const b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
     const c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
     v0.fromBufferAttribute(pos, a);
@@ -74,7 +88,10 @@ export function computeMeshStats(geo: THREE.BufferGeometry): MeshStats {
   };
 }
 
-export function analyzeShape(geo: THREE.BufferGeometry): ShapeAnalysis {
+export function analyzeShape(
+  geo: THREE.BufferGeometry,
+  topology?: TopologyGraph,
+): ShapeAnalysis {
   geo.computeBoundingBox();
   const bb = geo.boundingBox!;
   const size = new THREE.Vector3();
@@ -83,7 +100,18 @@ export function analyzeShape(geo: THREE.BufferGeometry): ShapeAnalysis {
   bb.getCenter(bbCenter);
 
   const sizeArr: [number, number, number] = [size.x, size.y, size.z];
-  const boxFallback: ShapeAnalysis = { kind: "box", xMm: size.x, yMm: size.y, zMm: size.z };
+  const boxFallback: ShapeAnalysis = {
+    kind: "box",
+    xMm: size.x,
+    yMm: size.y,
+    zMm: size.z,
+  };
+  const topologyResult = analyzeTopologyShape(topology, boxFallback);
+  if (topologyResult) {
+    console.debug("[shapeAnalysis] path=topology");
+    return topologyResult;
+  }
+  console.debug("[shapeAnalysis] path=mesh");
 
   const pos = geo.attributes.position;
   const idx = geo.index;
@@ -102,9 +130,12 @@ export function analyzeShape(geo: THREE.BufferGeometry): ShapeAnalysis {
 
   for (const mainKey of AXIS_KEYS) {
     const mAx = axisIdx(mainKey);
-    const [u1Key, u2Key] = mainKey === "x" ? (["y", "z"] as const)
-                       : mainKey === "y" ? (["x", "z"] as const)
-                       : (["x", "y"] as const);
+    const [u1Key, u2Key] =
+      mainKey === "x"
+        ? (["y", "z"] as const)
+        : mainKey === "y"
+          ? (["x", "z"] as const)
+          : (["x", "y"] as const);
     const u1 = axisIdx(u1Key);
     const u2 = axisIdx(u2Key);
 
@@ -124,6 +155,154 @@ export function analyzeShape(geo: THREE.BufferGeometry): ShapeAnalysis {
   return bestResult;
 }
 
+function analyzeTopologyShape(
+  topology: TopologyGraph | undefined,
+  boxFallback: ShapeAnalysis,
+): ShapeAnalysis | null {
+  if (!topology) return null;
+
+  const cylinders = findFacesByClass(topology, "cylinder")
+    .filter((face) => face.radius > 0)
+    .sort((a, b) => cylinderScore(b) - cylinderScore(a));
+  if (cylinders.length > 0) {
+    const dominant = cylinders[0];
+    const inner = cylinders
+      .slice(1)
+      .filter((face) => face.radius < dominant.radius * 0.95)
+      .sort((a, b) => b.radius - a.radius)[0];
+    return {
+      kind: "cylinder",
+      outerDiaMm: dominant.radius * 2,
+      innerDiaMm: inner ? inner.radius * 2 : null,
+      lengthMm:
+        dominant.length && dominant.length > 0
+          ? dominant.length
+          : longestBoxDim(boxFallback),
+    };
+  }
+
+  const hex = classifyTopologyHex(topology);
+  if (hex) return hex;
+
+  return boxFallback;
+}
+
+function cylinderScore(face: Extract<FaceClass, { kind: "cylinder" }>): number {
+  return face.radius * Math.max(face.length ?? 1, 1);
+}
+
+function classifyTopologyHex(topology: TopologyGraph): ShapeAnalysis | null {
+  const planes = findFacesByClass(topology, "plane");
+  if (planes.length < 6) return null;
+
+  for (const axis of AXIS_KEYS) {
+    const axisIndex = axisIdx(axis);
+    const [u1Key, u2Key] =
+      axis === "x"
+        ? (["y", "z"] as const)
+        : axis === "y"
+          ? (["x", "z"] as const)
+          : (["x", "y"] as const);
+    const u1 = axisIdx(u1Key);
+    const u2 = axisIdx(u2Key);
+    const sidePlanes = planes.filter(
+      (plane) => Math.abs(plane.normal[axisIndex]) < 0.25,
+    );
+    if (sidePlanes.length < 6) continue;
+
+    const angles = sidePlanes
+      .map((plane) => Math.atan2(plane.normal[u2], plane.normal[u1]))
+      .sort((a, b) => a - b);
+    if (!hasSixEvenTopologyAngles(angles)) continue;
+
+    const afMm = topologyAcrossFlats(sidePlanes);
+    if (afMm == null) continue;
+
+    return {
+      kind: "hex",
+      afMm,
+      lengthMm: topologyLengthFromPlaneCaps(planes, axisIndex) ?? afMm,
+    };
+  }
+
+  return null;
+}
+
+function hasSixEvenTopologyAngles(angles: number[]): boolean {
+  const unique: number[] = [];
+  for (const angle of angles) {
+    if (
+      unique.every(
+        (existing) => angularDistance(existing, angle) > (10 * Math.PI) / 180,
+      )
+    ) {
+      unique.push(angle);
+    }
+  }
+  if (unique.length !== 6) return false;
+
+  const sorted = unique.sort((a, b) => a - b);
+  const expectedGap = PI2 / 6;
+  for (let i = 0; i < sorted.length; i++) {
+    const next = i + 1 < sorted.length ? sorted[i + 1] : sorted[0] + PI2;
+    if (Math.abs(next - sorted[i] - expectedGap) > expectedGap * 0.25)
+      return false;
+  }
+  return true;
+}
+
+function topologyAcrossFlats(
+  planes: Extract<FaceClass, { kind: "plane" }>[],
+): number | null {
+  const widths: number[] = [];
+  for (let i = 0; i < planes.length; i++) {
+    for (let j = i + 1; j < planes.length; j++) {
+      const a = planes[i];
+      const b = planes[j];
+      if (dot3(a.normal, b.normal) > -0.95) continue;
+      widths.push(
+        Math.abs(dot3(a.origin, a.normal) - dot3(b.origin, a.normal)),
+      );
+    }
+  }
+  return median(widths.filter((value) => value > 0.01));
+}
+
+function topologyLengthFromPlaneCaps(
+  planes: Extract<FaceClass, { kind: "plane" }>[],
+  axisIndex: AxisIdx,
+): number | null {
+  const capDistances = planes
+    .filter((plane) => Math.abs(plane.normal[axisIndex]) > 0.9)
+    .map((plane) => plane.origin[axisIndex]);
+  if (capDistances.length < 2) return null;
+
+  return Math.max(...capDistances) - Math.min(...capDistances);
+}
+
+function longestBoxDim(shape: ShapeAnalysis): number {
+  if (shape.kind !== "box") return 0;
+  return Math.max(shape.xMm, shape.yMm, shape.zMm);
+}
+
+function dot3(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function angularDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b);
+  return diff > Math.PI ? PI2 - diff : diff;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 function extractTriangleData(
@@ -141,7 +320,7 @@ function extractTriangleData(
   const nrm = new THREE.Vector3();
 
   for (let t = 0; t < triCount; t++) {
-    const a = idx ? idx.getX(t * 3)     : t * 3;
+    const a = idx ? idx.getX(t * 3) : t * 3;
     const b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
     const c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
     v0.fromBufferAttribute(pos, a);
@@ -168,7 +347,12 @@ function extractTriangleData(
   return out;
 }
 
-function collectSideFaces(tris: TriangleData[], mAx: AxisIdx, u1: AxisIdx, u2: AxisIdx): SideFace[] {
+function collectSideFaces(
+  tris: TriangleData[],
+  mAx: AxisIdx,
+  u1: AxisIdx,
+  u2: AxisIdx,
+): SideFace[] {
   const sides: SideFace[] = [];
   for (const t of tris) {
     // Reject end-cap-like faces whose normal aligns with the candidate main axis
@@ -188,7 +372,10 @@ function collectSideFaces(tris: TriangleData[], mAx: AxisIdx, u1: AxisIdx, u2: A
   return sides;
 }
 
-function classifyFromSides(sides: SideFace[], lengthMm: number): ShapeAnalysis | null {
+function classifyFromSides(
+  sides: SideFace[],
+  lengthMm: number,
+): ShapeAnalysis | null {
   let totalArea = 0;
   for (const f of sides) totalArea += f.area;
   if (totalArea <= 0) return null;
@@ -218,7 +405,10 @@ function classifyFromSides(sides: SideFace[], lengthMm: number): ShapeAnalysis |
     if (cur < meanArea * 2.5) continue;
     let isPeak = true;
     for (let k = 1; k <= 4; k++) {
-      if (sm[(i - k + BINS) % BINS] > cur + 1e-9 || sm[(i + k) % BINS] > cur + 1e-9) {
+      if (
+        sm[(i - k + BINS) % BINS] > cur + 1e-9 ||
+        sm[(i + k) % BINS] > cur + 1e-9
+      ) {
         isPeak = false;
         break;
       }
@@ -228,10 +418,11 @@ function classifyFromSides(sides: SideFace[], lengthMm: number): ShapeAnalysis |
   // Merge close peaks (within ~16°), including wrap-around
   const merged: number[] = [];
   for (const p of peakBins) {
-    if (merged.length === 0 || p - merged[merged.length - 1] > 8) merged.push(p);
+    if (merged.length === 0 || p - merged[merged.length - 1] > 8)
+      merged.push(p);
   }
   if (merged.length >= 2) {
-    const wrapGap = (BINS - merged[merged.length - 1]) + merged[0];
+    const wrapGap = BINS - merged[merged.length - 1] + merged[0];
     if (wrapGap <= 8) merged.pop();
   }
 
@@ -240,13 +431,20 @@ function classifyFromSides(sides: SideFace[], lengthMm: number): ShapeAnalysis |
     return classifyAsCylinder(sides, lengthMm);
   }
   // ── Hex: 5-7 evenly-spaced peaks (~60° apart) ──
-  if (merged.length >= 5 && merged.length <= 7 && hasEvenSpacing(merged, BINS, 6, 0.35)) {
+  if (
+    merged.length >= 5 &&
+    merged.length <= 7 &&
+    hasEvenSpacing(merged, BINS, 6, 0.35)
+  ) {
     return classifyAsHex(sides, merged, BINS, lengthMm);
   }
   return null;
 }
 
-function classifyAsCylinder(sides: SideFace[], lengthMm: number): ShapeAnalysis | null {
+function classifyAsCylinder(
+  sides: SideFace[],
+  lengthMm: number,
+): ShapeAnalysis | null {
   const outer: number[] = [];
   const inner: number[] = [];
   for (const f of sides) {
@@ -262,16 +460,23 @@ function classifyAsCylinder(sides: SideFace[], lengthMm: number): ShapeAnalysis 
   if (inner.length > sides.length * 0.15) {
     inner.sort((a, b) => a - b);
     const innerR = inner[Math.floor(inner.length * 0.5)];
-    if (innerR > outerR * 0.05 && innerR < outerR * 0.95) innerDiaMm = innerR * 2;
+    if (innerR > outerR * 0.05 && innerR < outerR * 0.95)
+      innerDiaMm = innerR * 2;
   }
   return { kind: "cylinder", outerDiaMm: outerR * 2, innerDiaMm, lengthMm };
 }
 
-function classifyAsHex(sides: SideFace[], peaks: number[], BINS: number, lengthMm: number): ShapeAnalysis | null {
+function classifyAsHex(
+  sides: SideFace[],
+  peaks: number[],
+  BINS: number,
+  lengthMm: number,
+): ShapeAnalysis | null {
   const inradii: number[] = [];
   for (const pBin of peaks) {
     const target = (pBin / BINS) * PI2 - Math.PI;
-    let sumW = 0, sum = 0;
+    let sumW = 0,
+      sum = 0;
     for (const f of sides) {
       if (f.perpDist <= 0) continue;
       let da = Math.abs(f.angle - target);
@@ -290,7 +495,12 @@ function classifyAsHex(sides: SideFace[], peaks: number[], BINS: number, lengthM
   return { kind: "hex", afMm: inradius * 2, lengthMm };
 }
 
-function hasEvenSpacing(peaks: number[], BINS: number, expected: number, tolerance: number): boolean {
+function hasEvenSpacing(
+  peaks: number[],
+  BINS: number,
+  expected: number,
+  tolerance: number,
+): boolean {
   if (peaks.length < expected - 1 || peaks.length > expected + 1) return false;
   const expectedGap = BINS / expected;
   const sorted = [...peaks].sort((a, b) => a - b);
@@ -306,7 +516,8 @@ function scoreResult(r: ShapeAnalysis, sideCount: number): number {
   // Higher = more confident. Box never produced here (we return null instead).
   // Slightly prefer axes with more side-face coverage as a tiebreaker.
   const coverage = Math.min(sideCount, 500) * 0.02;
-  if (r.kind === "cylinder") return 100 + (r.innerDiaMm != null ? 25 : 0) + coverage;
-  if (r.kind === "hex")      return 100 + coverage;
+  if (r.kind === "cylinder")
+    return 100 + (r.innerDiaMm != null ? 25 : 0) + coverage;
+  if (r.kind === "hex") return 100 + coverage;
   return 0;
 }

@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as THREE from "three";
 import * as path from "path";
 import process from "process";
 import { loadStepFixture } from "./__testHelpers__/loadStepFixture";
 import { analyzeShape, type ShapeAnalysis } from "./shapeAnalysis";
+import { buildTopologyGraph } from "./topology";
+import type { TopologyPayload } from "@/types/topology";
 
 const FIXTURES_DIR = path.resolve(process.cwd(), "tests/fixtures/step");
 
@@ -148,7 +151,9 @@ describe("analyzeShape golden classification sweep", () => {
     "matches expected kind and dimensions for %s",
     async (fixtureName) => {
       const expected = SHAPE_GROUND_TRUTH[fixtureName];
-      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixtureName));
+      const meshes = await loadStepFixture(
+        path.join(FIXTURES_DIR, fixtureName),
+      );
       expect(meshes.length).toBe(1);
       const actual = analyzeShape(meshes[0].geometry);
       expectDimsClose(actual, expected, fixtureName);
@@ -159,7 +164,9 @@ describe("analyzeShape golden classification sweep", () => {
     const fixture = "self_filleted_cylinder.step";
     const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixture));
     const result = analyzeShape(meshes[0].geometry);
-    expect(result.kind, `expected cylinder, got ${result.kind}`).toBe("cylinder");
+    expect(result.kind, `expected cylinder, got ${result.kind}`).toBe(
+      "cylinder",
+    );
     expectDimsClose(result, SHAPE_GROUND_TRUTH[fixture], fixture);
   });
 
@@ -190,3 +197,112 @@ describe("analyzeShape golden classification sweep", () => {
     expect(counts.box, "box count below 5").toBeGreaterThanOrEqual(5);
   });
 });
+
+describe("analyzeShape topology path", () => {
+  it("returns exact cylinder dimensions from topology", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const topology = buildTopologyGraph({
+      faces: [cylinderFace("outer", 15, 140), cylinderFace("inner", 4, 140)],
+      edges: [],
+      adjacency: [],
+    });
+
+    const result = analyzeShape(boxGeometry(30, 30, 140), topology);
+
+    expect(result).toEqual({
+      kind: "cylinder",
+      outerDiaMm: 30,
+      innerDiaMm: 8,
+      lengthMm: 140,
+    });
+    expect(debugSpy).toHaveBeenCalledWith("[shapeAnalysis] path=topology");
+    debugSpy.mockRestore();
+  });
+
+  it("returns exact hex dimensions from topology planes", () => {
+    const topology = buildTopologyGraph(hexTopology(20, 25));
+
+    const result = analyzeShape(boxGeometry(23.094, 20, 25), topology);
+
+    expect(result.kind).toBe("hex");
+    if (result.kind !== "hex") return;
+    expect(result.afMm).toBeCloseTo(20, 2);
+    expect(result.lengthMm).toBeCloseTo(25, 2);
+  });
+
+  it("falls back to mesh path when topology is absent", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const result = analyzeShape(boxGeometry(10, 20, 30));
+
+    expect(result).toEqual({ kind: "box", xMm: 10, yMm: 20, zMm: 30 });
+    expect(debugSpy).toHaveBeenCalledWith("[shapeAnalysis] path=mesh");
+    debugSpy.mockRestore();
+  });
+});
+
+function cylinderFace(
+  id: string,
+  radius: number,
+  length: number,
+): TopologyPayload["faces"][number] {
+  return {
+    id: `f_${id}`,
+    index: radius,
+    surface: {
+      kind: "cylinder",
+      axis_origin: [0, 0, 0],
+      axis_direction: [0, 0, 1],
+      radius,
+      length,
+      angular_span: Math.PI * 2,
+    },
+    wires: [],
+  };
+}
+
+function hexTopology(afMm: number, lengthMm: number): TopologyPayload {
+  const sideFaces: TopologyPayload["faces"] = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * Math.PI) / 3;
+    const normal: [number, number, number] = [
+      Math.cos(angle),
+      Math.sin(angle),
+      0,
+    ];
+    sideFaces.push({
+      id: `f_side_${i}`,
+      index: i + 1,
+      surface: {
+        kind: "plane",
+        origin: [normal[0] * (afMm / 2), normal[1] * (afMm / 2), 0],
+        normal,
+      },
+      wires: [],
+    });
+  }
+
+  return {
+    faces: [
+      ...sideFaces,
+      {
+        id: "f_cap_min",
+        index: 7,
+        surface: { kind: "plane", origin: [0, 0, 0], normal: [0, 0, -1] },
+        wires: [],
+      },
+      {
+        id: "f_cap_max",
+        index: 8,
+        surface: { kind: "plane", origin: [0, 0, lengthMm], normal: [0, 0, 1] },
+        wires: [],
+      },
+    ],
+    edges: [],
+    adjacency: [],
+  };
+}
+
+function boxGeometry(x: number, y: number, z: number): THREE.BufferGeometry {
+  return new THREE.BoxGeometry(x, y, z);
+}
