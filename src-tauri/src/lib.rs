@@ -131,6 +131,41 @@ fn write_test_rust_crash_report(app: AppHandle) -> Result<String, String> {
     .map(|path| path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn open_logs_folder(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|err| format!("Unable to resolve app log dir: {err}"))?;
+    fs::create_dir_all(&dir).map_err(|err| format!("Unable to create logs dir: {err}"))?;
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("explorer");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("Unable to open logs folder: {err}"))
+}
+
 fn install_panic_hook(crash_dir: PathBuf) {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -272,20 +307,31 @@ pub fn run() {
                 .app_data_dir()
                 .map(|dir| dir.join(CRASH_REPORT_DIR))?;
             install_panic_hook(crash_dir);
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                    ])
+                    .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                    .max_file_size(10 * 1024 * 1024) // 10 MB per file
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5)) // Retain 5 files
+                    .level(log::LevelFilter::Info)
+                    .level_for("mio", log::LevelFilter::Warn)
+                    .level_for("tokio", log::LevelFilter::Warn)
+                    .level_for("sqlx", log::LevelFilter::Warn)
+                    .level_for("hyper", log::LevelFilter::Warn)
+                    .build(),
+            )?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             write_crash_report,
             get_latest_crash_report,
             open_crash_reports_folder,
-            write_test_rust_crash_report
+            write_test_rust_crash_report,
+            open_logs_folder
         ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

@@ -74,6 +74,10 @@ export async function openCrashReportsFolder(): Promise<void> {
   await invoke("open_crash_reports_folder");
 }
 
+export async function openLogsFolder(): Promise<void> {
+  await invoke("open_logs_folder");
+}
+
 export async function getLatestCrashReportText(): Promise<string | null> {
   if (isTauriRuntime()) {
     return await invoke<string | null>("get_latest_crash_report");

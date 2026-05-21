@@ -19,7 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { getAllSettings, setSetting } from "../db/queries";
 import type { AppSettingKey } from "../db/schema";
 import { isTauriRuntime } from "../utils/tauriRuntime";
-import { getLatestCrashReportText, openCrashReportsFolder, writeTestRustCrashReport } from "../utils/crashReports";
+import { getLatestCrashReportText, openCrashReportsFolder, writeTestRustCrashReport, openLogsFolder } from "../utils/crashReports";
 
 type SettingsForm = {
   unitSystem: "metric" | "imperial";
@@ -995,6 +995,15 @@ function DiagnosticsSettings() {
     }
   };
 
+  const openLogsFolderAction = async () => {
+    try {
+      await openLogsFolder();
+      setStatus("Application logs folder opened.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Unable to open logs folder.");
+    }
+  };
+
   const writeTestReport = async () => {
     try {
       const path = await writeTestRustCrashReport();
@@ -1027,6 +1036,19 @@ function DiagnosticsSettings() {
             )}
           </div>
         </div>
+
+        <div className="settings-control-row">
+          <div>
+            <div className="settings-control-title">Application logs</div>
+            <div className="settings-control-help">Logs are stored locally and rotated automatically to save disk space.</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button className="btn sm" type="button" onClick={openLogsFolderAction} disabled={!isTauriRuntime()}>
+              <FolderOpen size={14} /> Open logs folder
+            </button>
+          </div>
+        </div>
+
         {status && (
           <div className="quote-page-error" style={{ margin: 0 }}>
             <AlertTriangle size={15} />
