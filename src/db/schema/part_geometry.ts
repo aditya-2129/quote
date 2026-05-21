@@ -15,6 +15,12 @@ export const partGeometry = sqliteTable("part_geometry", {
   surfaceAreaMm2: real("surface_area_mm2").notNull().default(0),
   faceCount: integer("face_count").notNull().default(0),
   vertexCount: integer("vertex_count").notNull().default(0),
+  fingerprintHash: text("fingerprint_hash"),
+  triangleCount: integer("triangle_count"),
+  shapeKind: text("shape_kind"),
+  shapeParams: text("shape_params"),
+  faceColors: text("face_colors"),
+  meshBlobPath: text("mesh_blob_path"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 

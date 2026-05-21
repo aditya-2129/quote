@@ -256,6 +256,12 @@ pub fn run() {
             sql: include_str!("../migrations/0010_drop_edge_count.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "extend_part_geometry",
+            sql: include_str!("../migrations/0011_extend_part_geometry.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

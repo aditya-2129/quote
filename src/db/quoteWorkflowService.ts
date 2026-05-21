@@ -78,6 +78,12 @@ export type QuoteWorkflowPartGeometryDraft = {
   surfaceAreaMm2?: number;
   faceCount?: number;
   vertexCount?: number;
+  fingerprintHash?: string | null;
+  triangleCount?: number | null;
+  shapeKind?: string | null;
+  shapeParams?: string | null;
+  faceColors?: string | null;
+  meshBlobPath?: string | null;
 };
 
 export type QuoteWorkflowPartDraft = Part & {
@@ -285,6 +291,12 @@ function geometryToDraft(geometry: PartGeometry | null): QuoteWorkflowPartGeomet
     surfaceAreaMm2: geometry.surfaceAreaMm2,
     faceCount: geometry.faceCount,
     vertexCount: geometry.vertexCount,
+    fingerprintHash: geometry.fingerprintHash,
+    triangleCount: geometry.triangleCount,
+    shapeKind: geometry.shapeKind,
+    shapeParams: geometry.shapeParams,
+    faceColors: geometry.faceColors,
+    meshBlobPath: geometry.meshBlobPath,
   };
 }
 
@@ -356,6 +368,12 @@ async function savePartChildren(
       surfaceAreaMm2: finiteNumber(geometry.surfaceAreaMm2),
       faceCount: Math.trunc(finiteNumber(geometry.faceCount)),
       vertexCount: Math.trunc(finiteNumber(geometry.vertexCount)),
+      fingerprintHash: geometry.fingerprintHash ?? null,
+      triangleCount: geometry.triangleCount !== undefined && geometry.triangleCount !== null ? Math.trunc(finiteNumber(geometry.triangleCount)) : null,
+      shapeKind: geometry.shapeKind ?? null,
+      shapeParams: geometry.shapeParams ?? null,
+      faceColors: geometry.faceColors ?? null,
+      meshBlobPath: geometry.meshBlobPath ?? null,
     });
   } else {
     await deletePartGeometry(part.id);
