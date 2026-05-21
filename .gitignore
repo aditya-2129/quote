@@ -78,3 +78,4 @@ errors.txt
 # Project Specific
 design_bundle/
 design_extracted.json
+tools/*/target/

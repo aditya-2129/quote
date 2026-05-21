@@ -1,7 +1,7 @@
 # 015 — Spike: validate opencascade-rs maturity
 
 **Type:** HITL
-Status: ready-for-human
+Status: done
 
 ## What to build
 
@@ -16,11 +16,21 @@ HITL: outcome determines whether Phase 2 proceeds with `opencascade-rs`, falls b
 
 ## Acceptance criteria
 
-- [ ] Prototype builds on Windows
+- [x] Prototype builds on Windows
 - [ ] Reads STEP, lists faces with surface type
 - [ ] Output matches manual OCCT viewer inspection on 5 fixtures
 - [ ] Binary size impact measured (Tauri bundle delta)
-- [ ] Decision document committed to `docs/adr/` with recommendation
+- [x] Decision document committed to `docs/adr/` with recommendation
+
+## Outcome
+
+Decision captured in `docs/adr/0003-brep-topology-integration-path.md`.
+
+The spike rejects direct `opencascade-rs 0.2.0` adoption for Phase 2 on Windows. It also rejects `occt-wasm 3.0.1` as a drop-in backend because it builds but fails runtime initialization before fixture import.
+
+The unchecked acceptance items are intentionally left unchecked because the spike found blocker-level failures before fixture validation or Tauri bundle measurement could be completed. That is the HITL outcome of the spike, not remaining implementation work for `opencascade-rs`.
+
+Recommendation: implement Phase 2 as a narrow custom OCCT C++ shim called from Rust, exposing only the topology and analytic surface payload needed by the quote app.
 
 ## Blocked by
 
