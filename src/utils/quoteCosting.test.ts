@@ -16,6 +16,7 @@ import {
   partMaterialCost,
   partSetupCost,
   partMachineCost,
+  partFeatureCost,
   partFinishingCost,
   partSubtotal,
   calculateQuoteRollup,
@@ -28,7 +29,17 @@ import {
   type MaterialCatalog,
   type MachineCatalog,
   type CommercialTerms,
+  type PartWithFeatures,
 } from "./quoteCosting";
+import {
+  featureCycleMinutes,
+  DRILL_RATE_MM3_PER_MIN,
+  TAP_RATE_MM_PER_MIN,
+  POCKET_MILL_RATE_MM3_PER_MIN,
+  SLOT_MILL_RATE_MM3_PER_MIN,
+  FILLET_CHAMFER_RATE_MM_PER_MIN,
+  type FeatureInput,
+} from "./costing/featureCost";
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -920,5 +931,350 @@ describe("toQuoteCostSnapshot", () => {
     const rollup = calculateQuoteRollup([part], 1, defaultCommercial, matCatalog, machCatalog);
     const snap = toQuoteCostSnapshot(rollup);
     expect(snap.total).toBe(0.30);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature-based costing
+// ---------------------------------------------------------------------------
+
+describe("feature-based costing", () => {
+  // Helper to build a part with features
+  function makeFeaturePart(features: FeatureInput[], opOverrides: Partial<Op>[] = [{}]): PartWithFeatures {
+    return {
+      ...makePart({
+        operations: opOverrides.map((o, i) => makeOp({ id: `op-${i}`, ...o })),
+      }),
+      features,
+    };
+  }
+
+  // -- featureCycleMinutes unit tests ----------------------------------------
+
+  it("returns 0 for undefined features", () => {
+    expect(featureCycleMinutes(undefined)).toBe(0);
+  });
+
+  it("returns 0 for empty features array", () => {
+    expect(featureCycleMinutes([])).toBe(0);
+  });
+
+  // -- Hole drill time -------------------------------------------------------
+
+  it("hole drill time: π·(d/2)²·depth / DRILL_RATE", () => {
+    const hole: FeatureInput = {
+      featureType: "hole",
+      featureData: {
+        kind: "through",
+        diameter: 10,
+        depth: 20,
+        axisOrigin: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        faceIds: ["f1"],
+      },
+    };
+    const expected = (Math.PI * 25 * 20) / DRILL_RATE_MM3_PER_MIN;
+    expect(featureCycleMinutes([hole])).toBeCloseTo(expected, 8);
+  });
+
+  it("hole contributes machine cost via partFeatureCost", () => {
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const hole: FeatureInput = {
+      featureType: "hole",
+      featureData: {
+        kind: "through",
+        diameter: 10,
+        depth: 20,
+        axisOrigin: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        faceIds: ["f1"],
+      },
+    };
+    const part = makeFeaturePart([hole]);
+    const cost = partFeatureCost(part, 1, machCatalog);
+    const expectedMin = (Math.PI * 25 * 20) / DRILL_RATE_MM3_PER_MIN;
+    const expectedCost = (expectedMin / 60) * 1200 * 1;
+    expect(cost).toBeCloseTo(expectedCost, 6);
+    expect(cost).toBeGreaterThan(0);
+  });
+
+  // -- Threaded hole ----------------------------------------------------------
+
+  it("threaded hole = drill time + tap time", () => {
+    const thread: FeatureInput = {
+      featureType: "thread",
+      featureData: {
+        designation: "M6x1.0",
+        pitch: 1.0,
+        length: 15,
+        gender: "internal",
+        diameter: 5.0,
+        faceIds: ["f1"],
+      },
+    };
+    const r = 2.5;
+    const drillMin = (Math.PI * r * r * 15) / DRILL_RATE_MM3_PER_MIN;
+    const tapMin = 15 / TAP_RATE_MM_PER_MIN;
+    expect(featureCycleMinutes([thread])).toBeCloseTo(drillMin + tapMin, 8);
+  });
+
+  // -- Pocket mill time -------------------------------------------------------
+
+  it("pocket mill time: depth × footprint / POCKET_RATE", () => {
+    const pocket: FeatureInput = {
+      featureType: "pocket",
+      featureData: {
+        kind: "closed",
+        depth: 10,
+        footprintAreaMm2: 500,
+        accessDirections: [[0, 0, 1]],
+        wallCount: 4,
+        faceIds: ["f1", "f2"],
+      },
+    };
+    const expected = (10 * 500) / POCKET_MILL_RATE_MM3_PER_MIN;
+    expect(featureCycleMinutes([pocket])).toBeCloseTo(expected, 8);
+  });
+
+  // -- Slot mill time ---------------------------------------------------------
+
+  it("slot mill time: L × W × D / SLOT_RATE", () => {
+    const slot: FeatureInput = {
+      featureType: "slot",
+      featureData: {
+        kind: "rounded",
+        lengthMm: 40,
+        widthMm: 8,
+        depthMm: 5,
+        axis: [1, 0, 0] as [number, number, number],
+        faceIds: ["f1"],
+      },
+    };
+    const expected = (40 * 8 * 5) / SLOT_MILL_RATE_MM3_PER_MIN;
+    expect(featureCycleMinutes([slot])).toBeCloseTo(expected, 8);
+  });
+
+  // -- Fillet path length -----------------------------------------------------
+
+  it("fillet finishing pass: lengthMm / FILLET_CHAMFER_RATE", () => {
+    const fillet: FeatureInput = {
+      featureType: "fillet",
+      featureData: {
+        radius: 2,
+        lengthMm: 60,
+        adjacentFaceIds: ["a1", "a2"],
+        concavity: "concave" as const,
+        faceIds: ["f1"],
+      },
+    };
+    const expected = 60 / FILLET_CHAMFER_RATE_MM_PER_MIN;
+    expect(featureCycleMinutes([fillet])).toBeCloseTo(expected, 8);
+  });
+
+  // -- Chamfer path length ----------------------------------------------------
+
+  it("chamfer finishing pass: lengthMm / FILLET_CHAMFER_RATE", () => {
+    const chamfer: FeatureInput = {
+      featureType: "chamfer",
+      featureData: {
+        widthMm: 1,
+        angleDeg: 45,
+        lengthMm: 30,
+        adjacentFaceIds: ["a1", "a2"],
+        faceId: "f1",
+      },
+    };
+    const expected = 30 / FILLET_CHAMFER_RATE_MM_PER_MIN;
+    expect(featureCycleMinutes([chamfer])).toBeCloseTo(expected, 8);
+  });
+
+  // -- Boss = 0 cost ----------------------------------------------------------
+
+  it("bosses contribute zero cost", () => {
+    const boss: FeatureInput = {
+      featureType: "boss",
+      featureData: {
+        kind: "round",
+        height: 10,
+        baseFaceId: "base",
+        faceIds: ["f1", "f2"],
+        diameter: 20,
+      },
+    };
+    expect(featureCycleMinutes([boss])).toBe(0);
+
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const part = makeFeaturePart([boss]);
+    expect(partFeatureCost(part, 1, machCatalog)).toBe(0);
+  });
+
+  // -- Operator override beats feature-derived value --------------------------
+
+  it("operator manual override on operation is preserved alongside feature cost", () => {
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const hole: FeatureInput = {
+      featureType: "hole",
+      featureData: {
+        kind: "through",
+        diameter: 10,
+        depth: 20,
+        axisOrigin: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        faceIds: ["f1"],
+      },
+    };
+    // Operation with rateOverride — operator controls this op's cost
+    const part = makeFeaturePart([hole], [{ setupMin: 30, cycleMin: 10, rateOverride: 500 }]);
+
+    // Feature cost uses the first op's effective rate (500 override)
+    const featureCost = partFeatureCost(part, 1, machCatalog);
+    const featureMin = featureCycleMinutes([hole]);
+    expect(featureCost).toBeCloseTo((featureMin / 60) * 500 * 1, 6);
+
+    // Machine cost = operation cycle cost (uses override) + feature cost
+    const totalMachineCost = partMachineCost(part, 1, machCatalog);
+    const opCycleCost = (10 / 60) * 500 * 1;
+    expect(totalMachineCost).toBeCloseTo(opCycleCost + featureCost, 6);
+  });
+
+  // -- Legacy (no features) matches today exactly -----------------------------
+
+  it("part without features produces zero feature cost", () => {
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const part = makePart({ operations: [makeOp({ setupMin: 30, cycleMin: 10 })] });
+    expect(partFeatureCost(part, 5, machCatalog)).toBe(0);
+
+    // Machine cost is purely operation-based
+    const expected = (10 / 60) * 1200 * 5;
+    expect(partMachineCost(part, 5, machCatalog)).toBeCloseTo(expected, 6);
+  });
+
+  it("part with empty features array produces zero feature cost", () => {
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const part: PartWithFeatures = { ...makePart({ operations: [makeOp()] }), features: [] };
+    expect(partFeatureCost(part, 1, machCatalog)).toBe(0);
+  });
+
+  // -- Performance guard ------------------------------------------------------
+
+  it("100-feature rollup completes in under 50 ms", () => {
+    const features: FeatureInput[] = [];
+    for (let i = 0; i < 20; i++) {
+      features.push({
+        featureType: "hole",
+        featureData: {
+          kind: "through", diameter: 6, depth: 15,
+          axisOrigin: [i, 0, 0], axisDirection: [0, 0, 1], faceIds: [`h${i}`],
+        },
+      });
+    }
+    for (let i = 0; i < 20; i++) {
+      features.push({
+        featureType: "pocket",
+        featureData: {
+          kind: "closed", depth: 5, footprintAreaMm2: 200,
+          accessDirections: [[0, 0, 1]], wallCount: 4, faceIds: [`p${i}`],
+        },
+      });
+    }
+    for (let i = 0; i < 20; i++) {
+      features.push({
+        featureType: "slot",
+        featureData: {
+          kind: "rounded", lengthMm: 30, widthMm: 6, depthMm: 4,
+          axis: [1, 0, 0] as [number, number, number], faceIds: [`s${i}`],
+        },
+      });
+    }
+    for (let i = 0; i < 20; i++) {
+      features.push({
+        featureType: "fillet",
+        featureData: {
+          radius: 2, lengthMm: 40,
+          adjacentFaceIds: [`a${i}`], concavity: "concave" as const, faceIds: [`fl${i}`],
+        },
+      });
+    }
+    for (let i = 0; i < 20; i++) {
+      features.push({
+        featureType: "chamfer",
+        featureData: {
+          widthMm: 1, angleDeg: 45, lengthMm: 25,
+          adjacentFaceIds: [`a${i}`], faceId: `ch${i}`,
+        },
+      });
+    }
+
+    expect(features).toHaveLength(100);
+
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const part = makeFeaturePart(features);
+
+    const start = performance.now();
+    const cost = partFeatureCost(part, 10, machCatalog);
+    const elapsed = performance.now() - start;
+
+    expect(cost).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(50);
+  });
+
+  // -- Feature cost flows through to partSubtotal and rollup ------------------
+
+  it("feature cost is included in partSubtotal", () => {
+    const matCatalog = makeMaterialCatalog({ costPerKg: 100 });
+    const machCatalog = makeMachineCatalog({ ratePerHour: 1200 });
+    const hole: FeatureInput = {
+      featureType: "hole",
+      featureData: {
+        kind: "through",
+        diameter: 10,
+        depth: 20,
+        axisOrigin: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        faceIds: ["f1"],
+      },
+    };
+    const part: PartWithFeatures = {
+      ...makePart({
+        mass: 1.0,
+        stock: null,
+        operations: [makeOp({ setupMin: 0, cycleMin: 0 })],
+      }),
+      features: [hole],
+    };
+
+    const featureCost = partFeatureCost(part, 1, machCatalog);
+    const subtotal = partSubtotal(part, 1, matCatalog, machCatalog);
+    // subtotal = material (100) + setup (0) + machine (0 ops + featureCost)
+    expect(subtotal).toBeCloseTo(100 + featureCost, 6);
+    expect(featureCost).toBeGreaterThan(0);
+  });
+
+  it("feature cost is included in calculateQuoteRollup", () => {
+    const matCatalog = makeMaterialCatalog({ costPerKg: 0 });
+    const machCatalog = makeMachineCatalog({ ratePerHour: 600 });
+    const pocket: FeatureInput = {
+      featureType: "pocket",
+      featureData: {
+        kind: "closed",
+        depth: 10,
+        footprintAreaMm2: 500,
+        accessDirections: [[0, 0, 1]],
+        wallCount: 4,
+        faceIds: ["f1"],
+      },
+    };
+    const part: PartWithFeatures = {
+      ...makePart({
+        mass: 0,
+        stock: null,
+        operations: [makeOp({ setupMin: 0, cycleMin: 0 })],
+      }),
+      features: [pocket],
+    };
+
+    const rollup = calculateQuoteRollup([part], 1, defaultCommercial, matCatalog, machCatalog);
+    expect(rollup.machineCost).toBeGreaterThan(0);
+    expect(rollup.partsCost).toBeGreaterThan(0);
   });
 });

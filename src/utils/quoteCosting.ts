@@ -1,5 +1,14 @@
 import type { Machine, Material, QuoteCostSnapshot } from "../db/schema";
 import type { Op, Part, Stock } from "./quoteTypes";
+import { featureCycleMinutes, type FeatureInput } from "./costing/featureCost";
+
+/**
+ * Extended Part that may carry detected features.
+ * Optional field — legacy parts without features produce identical output.
+ */
+export type PartWithFeatures = Part & {
+  features?: readonly FeatureInput[];
+};
 
 export type MaterialCatalog = Record<string, {
   densityKgPerM3: number;
@@ -144,11 +153,23 @@ export function partSetupCost(part: Part, machines: MachineCatalog): number {
   ), 0);
 }
 
-export function partMachineCost(part: Part, assemblyQuantity: number, machines: MachineCatalog): number {
+export function partFeatureCost(part: PartWithFeatures, assemblyQuantity: number, machines: MachineCatalog): number {
+  if (!part.features || part.features.length === 0) return 0;
+  const featureMin = featureCycleMinutes(part.features);
+  // Use the first operation's machine rate as the feature-machining rate.
+  // If no operations exist, feature cost cannot be priced (no machine assigned).
+  const ops = part.operations || [];
+  const rate = ops.length > 0 ? operationRate(ops[0], machines) : 0;
   const quantity = partQuantity(part, assemblyQuantity);
-  return (part.operations || []).reduce((sum, operation) => (
+  return (featureMin / 60) * rate * quantity;
+}
+
+export function partMachineCost(part: PartWithFeatures, assemblyQuantity: number, machines: MachineCatalog): number {
+  const quantity = partQuantity(part, assemblyQuantity);
+  const opCost = (part.operations || []).reduce((sum, operation) => (
     sum + (operation.cycleMin / 60) * operationRate(operation, machines) * quantity
   ), 0);
+  return opCost + partFeatureCost(part, assemblyQuantity, machines);
 }
 
 export function partFinishingCost(part: Part, assemblyQuantity: number): number {
@@ -156,7 +177,7 @@ export function partFinishingCost(part: Part, assemblyQuantity: number): number 
 }
 
 export function partSubtotal(
-  part: Part,
+  part: PartWithFeatures,
   assemblyQuantity: number,
   materials: MaterialCatalog,
   machines: MachineCatalog,
