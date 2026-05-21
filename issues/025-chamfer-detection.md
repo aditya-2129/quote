@@ -1,7 +1,8 @@
 # 025 — Chamfer detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: b4e644b
 
 ## What to build
 

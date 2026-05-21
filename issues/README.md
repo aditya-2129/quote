@@ -54,6 +54,9 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 022 | d30666f | `detectPockets(graph)` in `src/utils/features/pockets.ts` classifies planar-floor concave regions as open/closed via AABB ray cast; perpendicularity tolerance rejects chamfered edges; 6/6 unit tests |
 | 023 | 0d229de | `detectSlots(graph)` in `src/utils/features/slots.ts` detects rounded (paired parallel cylinders + walls) and rectangular (aspect>2) slots with shared-face dedup; 7/7 unit tests |
 | 024 | db3f1f7 | `detectFillets(graph)` in `src/utils/features/fillets.ts` classifies partial-span cylinder/cone/torus faces with convex/concave via signed-distance to adjacent plane normals; 7/7 unit tests |
+| 025 | b4e644b | `detectChamfers(graph)` in `src/utils/features/chamfers.ts` detects narrow planar strips between two adjacent planes (30°–60° tilt, width/length < 0.2); 5/5 unit tests |
+| 026 | 5e349e4 | `detectThreads(graph)` in `src/utils/features/threads.ts` matches cylinder diameters to standard M3–M12 + UNC/UNF table (±0.2 mm), internal/external via concavity, returns `unknown` for non-standard pitches; 7/7 unit tests |
+| 027 | 79b57a3 | `detectBosses(graph)` in `src/utils/features/bosses.ts` detects round and rectangular protrusions from a base face; coexists with concentric holes; 6/6 unit tests |
 
 ## Suggested execution order
 

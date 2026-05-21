@@ -1,7 +1,8 @@
 # 027 — Boss detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 79b57a3
 
 ## What to build
 

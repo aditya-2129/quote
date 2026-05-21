@@ -1,7 +1,8 @@
 # 026 — Thread detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 5e349e4
 
 ## What to build
 
