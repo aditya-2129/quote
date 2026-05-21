@@ -26,6 +26,7 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
 
   const slots: Slot[] = [];
   const matchedFaceIds = new Set<string>();
+  const faceEdgeSets = buildFaceEdgeSets(graph);
 
   // 1. Detect Rounded Slots
   const cylinders = findFacesByClass(graph, "cylinder").filter(
@@ -70,8 +71,8 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
       // Look for parallel planar walls connecting c1 and c2
       const N_ideal = normalize(cross(V_axis, V_sep));
       const matchingWalls = planes.filter((pl) => {
-        const sharesWithC1 = sharesEdge(pl.face.id, c1.face.id, graph);
-        const sharesWithC2 = sharesEdge(pl.face.id, c2.face.id, graph);
+        const sharesWithC1 = sharesEdge(pl.face.id, c1.face.id, faceEdgeSets);
+        const sharesWithC2 = sharesEdge(pl.face.id, c2.face.id, faceEdgeSets);
         if (!sharesWithC1 || !sharesWithC2) return false;
         return isParallel(pl.normal, N_ideal);
       });
@@ -83,9 +84,9 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
       const floors = planes.filter((pl) => {
         if (!isParallel(pl.normal, V_axis)) return false;
         return (
-          sharesEdge(pl.face.id, c1.face.id, graph) ||
-          sharesEdge(pl.face.id, c2.face.id, graph) ||
-          matchingWalls.some((w) => sharesEdge(pl.face.id, w.face.id, graph))
+          sharesEdge(pl.face.id, c1.face.id, faceEdgeSets) ||
+          sharesEdge(pl.face.id, c2.face.id, faceEdgeSets) ||
+          matchingWalls.some((w) => sharesEdge(pl.face.id, w.face.id, faceEdgeSets))
         );
       });
 
@@ -100,7 +101,7 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
         let bestTop: PlaneClass | null = null;
         for (const p of parallelPlanes) {
           const sharesWithWall = matchingWalls.some((w) =>
-            sharesEdge(p.face.id, w.face.id, graph),
+            sharesEdge(p.face.id, w.face.id, faceEdgeSets),
           );
           if (sharesWithWall) {
             bestTop = p;
@@ -157,7 +158,7 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
       if (w.face.id === floor.face.id) return false;
       if (matchedFaceIds.has(w.face.id)) return false;
       return (
-        sharesEdge(floor.face.id, w.face.id, graph) &&
+        sharesEdge(floor.face.id, w.face.id, faceEdgeSets) &&
         isOrthogonal(floor.normal, w.normal)
       );
     });
@@ -222,7 +223,7 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
               let bestTop: PlaneClass | null = null;
               for (const p of parallelPlanes) {
                 const sharesWithWall = [p1.w1, p1.w2, p2.w1, p2.w2].some((w) =>
-                  sharesEdge(p.face.id, w.face.id, graph),
+                  sharesEdge(p.face.id, w.face.id, faceEdgeSets),
                 );
                 if (sharesWithWall) {
                   bestTop = p;
@@ -331,14 +332,27 @@ function isOrthogonal(
   return Math.abs(dot(normalize(a), normalize(b))) < tolerance;
 }
 
+function buildFaceEdgeSets(
+  graph: TopologyGraph,
+): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const [faceId, edgeIds] of graph.adjacency.entries()) {
+    map.set(faceId, new Set(edgeIds));
+  }
+  return map;
+}
+
 function sharesEdge(
   faceId1: string,
   faceId2: string,
-  graph: TopologyGraph,
+  faceEdgeSets: Map<string, Set<string>>,
 ): boolean {
-  const edges1 = graph.adjacency.get(faceId1);
-  const edges2 = graph.adjacency.get(faceId2);
-  if (!edges1 || !edges2) return false;
-  const set1 = new Set(edges1);
-  return edges2.some((e) => set1.has(e));
+  const set1 = faceEdgeSets.get(faceId1);
+  const set2 = faceEdgeSets.get(faceId2);
+  if (!set1 || !set2) return false;
+  const [small, big] = set1.size <= set2.size ? [set1, set2] : [set2, set1];
+  for (const e of small) {
+    if (big.has(e)) return true;
+  }
+  return false;
 }
