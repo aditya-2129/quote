@@ -363,6 +363,9 @@ async function savePartChildren(
     await deletePartGeometry(part.id);
   }
 
+  // TODO: Wire part_features persistence during save (Issue 028)
+
+
   const existingOperations = await getOperationsByPart(part.id);
   const incomingOperationIds = new Set(part.operations.map((op) => op.id));
   for (const operation of existingOperations) {
@@ -610,7 +613,9 @@ export async function loadQuoteWorkflow(quoteId: string): Promise<LoadedQuoteWor
     part.geometry = geometryToDraft(geometry);
     part.netVolumeMm3 = geometry?.volumeMm3 ?? part.netVolumeMm3;
     part.operations = operations.map(operationToDraft);
+    // TODO: Wire part_features loading during load (Issue 028)
     parts.push(part);
+
   }
 
   const bopRows = await getQuoteBopsByQuote(quote.id);

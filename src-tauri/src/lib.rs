@@ -305,6 +305,12 @@ pub fn run() {
             sql: include_str!("../migrations/0012_quote_cad_blob_store.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 13,
+            description: "part_features",
+            sql: include_str!("../migrations/0013_part_features.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

@@ -30,6 +30,8 @@ import type {
   QuoteStatus,
   Rfq,
   RfqStatus,
+  StoredPartFeature,
+  PartFeatureInput,
 } from "./schema";
 
 type BrowserDb = {
@@ -47,6 +49,7 @@ type BrowserDb = {
   quoteExtraCosts: QuoteExtraCost[];
   quotes: Quote[];
   rfqs: Rfq[];
+  partFeatures: StoredPartFeature[];
 };
 
 const STORAGE_KEY = "quote:dev-browser-db:v1";
@@ -139,6 +142,7 @@ const initialDb: BrowserDb = {
   ],
   quoteBops: [],
   quoteExtraCosts: [],
+  partFeatures: [],
 };
 
 function reviveDates<T>(value: T): T {
@@ -185,6 +189,7 @@ function deletePartRows(db: BrowserDb, partId: string): void {
   db.partStock = db.partStock.filter(row => row.partId !== partId);
   db.partGeometry = db.partGeometry.filter(row => row.partId !== partId);
   db.partOperations = db.partOperations.filter(row => row.partId !== partId);
+  db.partFeatures = db.partFeatures.filter(row => row.partId !== partId);
 }
 
 function deleteQuoteRows(db: BrowserDb, quoteId: string): void {
@@ -778,6 +783,34 @@ export const browserDb = {
     const db = readDb();
     db.quoteExtraCosts = db.quoteExtraCosts.filter(row => row.quoteId !== quoteId);
     writeDb(db);
+  },
+  getFeaturesForPart(partId: string): StoredPartFeature[] {
+    return readDb().partFeatures.filter(row => row.partId === partId);
+  },
+  replaceFeaturesForPart(partId: string, features: PartFeatureInput[]): void {
+    const db = readDb();
+    db.partFeatures = db.partFeatures.filter(row => row.partId !== partId);
+    let maxId = db.partFeatures.reduce((max, f) => f.id > max ? f.id : max, 0);
+    const now = Date.now();
+    for (const f of features) {
+      maxId++;
+      db.partFeatures.push({
+        id: maxId,
+        partId,
+        featureType: f.featureType,
+        featureData: f.featureData,
+        faceIds: f.faceIds,
+        createdAt: now
+      });
+    }
+    writeDb(db);
+  },
+  countFeatures(partId: string, featureType?: string): number {
+    const rows = readDb().partFeatures.filter(row => row.partId === partId);
+    if (featureType) {
+      return rows.filter(row => row.featureType === featureType).length;
+    }
+    return rows.length;
   },
 };
 
