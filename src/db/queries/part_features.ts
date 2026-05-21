@@ -1,11 +1,15 @@
 import { and, eq } from "drizzle-orm";
-import { getDb } from "../client";
+import { getDb, type DbClient } from "../client";
 import { browserDb, isBrowserDbFallback } from "../browserFallback";
 import { partFeatures, type PartFeatureInput, type StoredPartFeature } from "../schema";
 
+// Either the top-level client or a transaction handle passed in by the caller.
+// Tests substitute mocks via the same parameter.
+type DbOrTx = DbClient | Parameters<Parameters<DbClient["transaction"]>[0]>[0];
+
 export async function getFeaturesForPart(
   partId: string,
-  db?: any
+  db?: DbOrTx,
 ): Promise<StoredPartFeature[]> {
   if (isBrowserDbFallback()) {
     return browserDb.getFeaturesForPart(partId);
@@ -18,7 +22,7 @@ export async function getFeaturesForPart(
     .where(eq(partFeatures.partId, partId))
     .all();
 
-  return rows.map((row: any) => ({
+  return rows.map((row) => ({
     id: row.id,
     partId: row.partId,
     featureType: row.featureType,
@@ -31,7 +35,7 @@ export async function getFeaturesForPart(
 export async function replaceFeaturesForPart(
   partId: string,
   features: PartFeatureInput[],
-  db?: any
+  db?: DbOrTx,
 ): Promise<void> {
   if (isBrowserDbFallback()) {
     return browserDb.replaceFeaturesForPart(partId, features);
@@ -39,7 +43,7 @@ export async function replaceFeaturesForPart(
 
   const clientDb = db || (await getDb());
 
-  const runReplacement = async (tx: any) => {
+  const runReplacement = async (tx: DbOrTx) => {
     // Delete all existing features for this part
     await tx.delete(partFeatures).where(eq(partFeatures.partId, partId)).run();
 
@@ -63,7 +67,7 @@ export async function replaceFeaturesForPart(
     await runReplacement(db);
   } else {
     // Otherwise, execute in a transaction on the client db
-    await clientDb.transaction(async (tx: any) => {
+    await (clientDb as DbClient).transaction(async (tx) => {
       await runReplacement(tx);
     });
   }
@@ -72,7 +76,7 @@ export async function replaceFeaturesForPart(
 export async function countFeatures(
   partId: string,
   featureType?: string,
-  db?: any
+  db?: DbOrTx,
 ): Promise<number> {
   if (isBrowserDbFallback()) {
     return browserDb.countFeatures(partId, featureType);
