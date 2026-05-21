@@ -14,8 +14,8 @@ The app is a local-first Tauri desktop application. React owns the product UI an
 ## CAD Flow
 
 - `src/context/CadContext.tsx` owns the imported `CadImportResult`, import status, and handoff flag.
-- `src/utils/cad.ts` imports STEP/IGES/BREP through `occt-import-js` and builds Three.js geometry plus metadata.
-- `src/components/CadViewer.tsx` renders the full viewer and must be treated carefully because it contains tuned interaction and explode behavior.
+- `src/utils/cad.ts` orchestrates STEP/IGES/BREP import and builds Three.js geometry plus metadata. The heavy `occt-import-js` WASM call runs in `src/workers/occt.worker.ts` via Comlink; `src/utils/cadWorker.ts` is the main-thread wrapper and owns worker lifecycle (spawn-per-import, terminate on completion or AbortSignal).
+- `src/components/CadViewer/` renders the full viewer and must be treated carefully because it contains tuned interaction and explode behavior. The protected explode algorithm lives in `src/components/CadViewer/explode.ts` per AGENTS.MD.
 - `src/components/ViewerWorkspace.tsx` composes the viewer, tree, toolbar, and inspector.
 - `src/utils/cadHandoff.ts` converts CAD meshes to quote parts.
 - `src/utils/meshFingerprint.ts` groups identical bodies before quote row creation.

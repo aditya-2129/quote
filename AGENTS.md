@@ -50,7 +50,7 @@ Run the narrowest meaningful check for code changes. For common changes, prefer 
 - Quote costing: `src/utils/quoteCosting.ts`, `src/context/QuoteStateContext.tsx`
 - Quote workspace: `src/pages/QuoteDetailPage.tsx` (layout orchestrator), `src/pages/QuoteDetail/` (sub-components)
 - PDF export: `src/utils/export.ts` (renderer), `src/utils/pdfAssembly.ts` (data assembly), `src/utils/fileSave.ts` (platform save)
-- CAD import: `src/utils/cad.ts`, `src/context/CadContext.tsx`, `src/components/ViewerWorkspace.tsx`
+- CAD import: `src/utils/cad.ts`, `src/utils/cadWorker.ts`, `src/workers/occt.worker.ts`, `src/context/CadContext.tsx`, `src/components/ViewerWorkspace.tsx`
 - CAD handoff: `src/utils/cadHandoff.ts`, `src/pages/QuoteDetailPage.tsx`
 - Persistence: `src/db/quoteWorkflowService.ts`, `src/context/QuoteStateContext.tsx`, `src/db/schema/`, `src/db/queries/`
 - Geometry: `src/utils/geometry.ts`, `src/utils/meshFingerprint.ts`, `src/utils/cad.ts`
