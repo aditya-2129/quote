@@ -1,7 +1,8 @@
 # 028 — part_features DB schema + persistence
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 65b2711
 
 ## What to build
 

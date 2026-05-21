@@ -57,6 +57,8 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 025 | b4e644b | `detectChamfers(graph)` in `src/utils/features/chamfers.ts` detects narrow planar strips between two adjacent planes (30°–60° tilt, width/length < 0.2); 5/5 unit tests |
 | 026 | 5e349e4 | `detectThreads(graph)` in `src/utils/features/threads.ts` matches cylinder diameters to standard M3–M12 + UNC/UNF table (±0.2 mm), internal/external via concavity, returns `unknown` for non-standard pitches; 7/7 unit tests |
 | 027 | 79b57a3 | `detectBosses(graph)` in `src/utils/features/bosses.ts` detects round and rectangular protrusions from a base face; coexists with concentric holes; 6/6 unit tests |
+| 028 | 65b2711 | `part_features` SQLite table (migration 0013, registered as version 13 in lib.rs), Drizzle schema with discriminated `PartFeatureData` union, query helpers (`getFeaturesForPart`/`replaceFeaturesForPart`/`countFeatures`) with transactional replace, browser fallback; wiring points stubbed with TODOs in `quoteWorkflowService` |
+| 029 | a0ca938 | `analyzeAccessibility(features)` in `src/utils/manufacturing/accessibility.ts` returns `{maxAxisRequirement, setupCount, inaccessibleFeatures, approachDirectionsPerFeature}` via greedy set-cover over feature approach directions; classifies lathe / 3/4/5-axis / mill-turn / not-machinable; 9/9 unit tests |
 
 ## Suggested execution order
 

@@ -1,7 +1,8 @@
 # 029 — Accessibility analysis (3/4/5-axis classifier)
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: a0ca938
 
 ## What to build
 
