@@ -51,6 +51,9 @@ AI work is tracked in a separate plan (`plans/ai-roadmap.md`, to be written) and
 | 019 | 7d564ef | JS `TopologyGraph`, `FaceClass`/`EdgeClass` discriminated unions, `findFacesByClass`/`neighborsOf`/`wireLoopsOf` helpers with graceful undefined handling |
 | 020 | d70223f | `analyzeShape()` prefers topology when available (exact cylinder + hex dimensions), falls back to mesh heuristic; path logged via `console.debug` |
 | 021 | 7215ab4 | `detectHoles(graph)` in `src/utils/features/holes.ts` classifies coaxial cylinder/cone groups into through/blind/counterbore/countersink with chain merging; 10/10 unit tests; 50-hole perf well under 100 ms |
+| 022 | d30666f | `detectPockets(graph)` in `src/utils/features/pockets.ts` classifies planar-floor concave regions as open/closed via AABB ray cast; perpendicularity tolerance rejects chamfered edges; 6/6 unit tests |
+| 023 | 0d229de | `detectSlots(graph)` in `src/utils/features/slots.ts` detects rounded (paired parallel cylinders + walls) and rectangular (aspect>2) slots with shared-face dedup; 7/7 unit tests |
+| 024 | db3f1f7 | `detectFillets(graph)` in `src/utils/features/fillets.ts` classifies partial-span cylinder/cone/torus faces with convex/concave via signed-distance to adjacent plane normals; 7/7 unit tests |
 
 ## Suggested execution order
 

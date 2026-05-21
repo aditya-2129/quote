@@ -1,7 +1,8 @@
 # 023 — Slot detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: 0d229de
 
 ## What to build
 

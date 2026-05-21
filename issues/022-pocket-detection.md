@@ -1,7 +1,8 @@
 # 022 — Pocket detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: d30666f
 
 ## What to build
 

@@ -1,7 +1,8 @@
 # 024 — Fillet detection module
 
 **Type:** AFK
-Status: implementation-verified
+Status: done
+Completed in: db3f1f7
 
 ## What to build
 
