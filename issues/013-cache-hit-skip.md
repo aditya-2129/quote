@@ -1,8 +1,7 @@
 # 013 — STEP SHA-256 cache key + hit-skip path
 
 **Type:** AFK
-Status: done
-Completed in: e9913d6
+Status: ready-for-agent
 
 ## What to build
 
@@ -12,11 +11,11 @@ Integration: extend `src/context/CadContext.tsx` to consult the cache before inv
 
 ## Acceptance criteria
 
-- [x] Second import of the same STEP file completes in under 500ms (measured wall-clock)
-- [x] Changing occt-import options invalidates cache
-- [x] Cache hit ratio visible in dev menu
-- [x] No staleness bug: deleting a cache row triggers re-import on next load
-- [x] Cache survives app restart
+- [ ] Second import of the same STEP file completes in under 500ms (measured wall-clock)
+- [ ] Changing occt-import options invalidates cache
+- [ ] Cache hit ratio visible in dev menu
+- [ ] No staleness bug: deleting a cache row triggers re-import on next load
+- [ ] Cache survives app restart
 
 ## Blocked by
 
