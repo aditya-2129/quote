@@ -1,3 +1,5 @@
+mod cad;
+
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -337,7 +339,8 @@ pub fn run() {
             get_latest_crash_report,
             open_crash_reports_folder,
             write_test_rust_crash_report,
-            open_logs_folder
+            open_logs_folder,
+            cad::topology::extract_topology
         ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
