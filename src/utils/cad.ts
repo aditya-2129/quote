@@ -9,6 +9,8 @@ import {
 } from "./geometryCache";
 import type { SerializableMesh } from "../workers/occt.worker";
 import type { StepGeometryInput } from "../types";
+import type { TopologyPayload } from "../types/topology";
+import { isTauriRuntime } from "./tauriRuntime";
 
 type BrepFace = {
   first: number;
@@ -59,7 +61,37 @@ export type CadImportResult = {
   geometry: StepGeometryInput;
   source: "step" | "sample";
   warning?: string;
+  /**
+   * Whole-file BREP topology, extracted via the `extract_topology` Tauri
+   * command. Only available in the desktop runtime. Used by the feature
+   * recognition layer; undefined in the browser/Vite runtime.
+   */
+  topology?: TopologyPayload;
 };
+
+/**
+ * Extract whole-file BREP topology from raw STEP bytes.
+ *
+ * Desktop-only: the OCCT topology shim runs in the Rust process. Returns
+ * undefined (never throws) in the browser or when extraction fails, so the
+ * mesh import path is unaffected.
+ */
+async function extractTopology(
+  buffer: Uint8Array,
+): Promise<TopologyPayload | undefined> {
+  if (!isTauriRuntime()) return undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const envelope = await invoke<{ version: number; topology: TopologyPayload }>(
+      "extract_topology",
+      { stepBytes: buffer },
+    );
+    return envelope?.topology;
+  } catch (err) {
+    console.warn("[cad] BREP topology extraction unavailable", err);
+    return undefined;
+  }
+}
 
 function createBoxGeometrySummary(
   fileName: string,
@@ -389,7 +421,20 @@ export async function importStepBytes(
     const cached = await lookupCachedImport(cacheKey);
     if (cached) {
       recordCacheHit();
-      return { ...cached, fileName };
+      const hit: CadImportResult = { ...cached, fileName };
+      // Legacy cache entries predate topology, or predate per-body grouping
+      // (no `bodies` field). Backfill once so per-body feature recognition
+      // works without forcing a full re-import.
+      if (!hit.topology || hit.topology.bodies === undefined) {
+        const refreshed = await extractTopology(buffer);
+        if (refreshed) {
+          hit.topology = refreshed;
+          void storeCachedImport(cacheKey, hit).catch((err) =>
+            console.warn("[cad] cache write failed", err),
+          );
+        }
+      }
+      return hit;
     }
   }
   recordCacheMiss();
@@ -440,6 +485,7 @@ export async function importStepBytes(
         : buildFallbackTree(fileName, meshes),
     geometry: analyzeBufferGeometries(fileName, meshes),
     source: "step",
+    topology: await extractTopology(buffer),
   };
 
   void storeCachedImport(cacheKey, importResult).catch((err) =>

@@ -111,12 +111,20 @@ describe("detectChamfers", () => {
 
     const graph = buildTopologyGraph({ faces, edges, adjacency });
 
-    const start = performance.now();
-    const chamfers = detectChamfers(graph);
-    const elapsed = performance.now() - start;
+    // Take the fastest of several runs after a warm-up. The minimum is
+    // immune to GC pauses and CPU contention under the full suite, while a
+    // genuine algorithmic regression slows every run, including this one.
+    detectChamfers(graph);
+    let chamfers: ReturnType<typeof detectChamfers> = [];
+    let fastestMs = Infinity;
+    for (let run = 0; run < 5; run++) {
+      const start = performance.now();
+      chamfers = detectChamfers(graph);
+      fastestMs = Math.min(fastestMs, performance.now() - start);
+    }
 
     expect(chamfers).toHaveLength(50);
-    expect(elapsed).toBeLessThan(100);
+    expect(fastestMs).toBeLessThan(100);
   });
 });
 

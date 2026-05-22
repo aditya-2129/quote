@@ -28,6 +28,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopTools_ListIteratorOfListOfShape.hxx>
 
 // OCCT headers — geometry queries
@@ -374,6 +375,36 @@ static TopoResult* do_extract(const uint8_t* step_data, size_t step_len) {
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
     TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
 
+    // ── 3b. Body grouping ──
+    // Group faces by their owning solid so the JS feature layer can run
+    // per-body feature recognition on multi-body STEP files. Files with no
+    // solids fall back to shells; files with neither leave faces ungrouped.
+    TopTools_IndexedMapOfShape bodyMap;
+    TopExp::MapShapes(shape, TopAbs_SOLID, bodyMap);
+    TopAbs_ShapeEnum bodyKind = TopAbs_SOLID;
+    if (bodyMap.Extent() == 0) {
+        TopExp::MapShapes(shape, TopAbs_SHELL, bodyMap);
+        bodyKind = TopAbs_SHELL;
+    }
+
+    // faceMap index (1-based) → 0-based body index, or -1 when the face has
+    // no body owner (free faces, or a file with no solids/shells).
+    std::vector<int> faceBody(faceMap.Extent(), -1);
+    if (bodyMap.Extent() > 0) {
+        TopTools_IndexedDataMapOfShapeListOfShape faceBodyMap;
+        TopExp::MapShapesAndAncestors(shape, TopAbs_FACE, bodyKind, faceBodyMap);
+        for (int fi = 1; fi <= faceMap.Extent(); ++fi) {
+            const TopoDS_Shape& f = faceMap(fi);
+            if (faceBodyMap.Contains(f)) {
+                const TopTools_ListOfShape& owners = faceBodyMap.FindFromKey(f);
+                if (!owners.IsEmpty()) {
+                    int bodyIdx = bodyMap.FindIndex(owners.First());
+                    if (bodyIdx > 0) faceBody[fi - 1] = bodyIdx - 1;
+                }
+            }
+        }
+    }
+
     // ── 4. Generate deterministic IDs ──
     std::vector<std::string> faceIds(faceMap.Extent());
     for (int i = 1; i <= faceMap.Extent(); ++i) {
@@ -399,6 +430,9 @@ static TopoResult* do_extract(const uint8_t* step_data, size_t step_len) {
         js << "{";
         js << "\"id\":" << json_string(faceIds[fi - 1]);
         js << ",\"index\":" << fi;
+        js << ",\"body\":";
+        if (faceBody[fi - 1] >= 0) js << faceBody[fi - 1];
+        else js << "null";
         js << ",\"surface\":" << surface_classification_json(face);
 
         // Wire loops
@@ -473,6 +507,27 @@ static TopoResult* do_extract(const uint8_t* step_data, size_t step_len) {
             }
         }
         js << "]";
+        js << "}";
+    }
+    js << "]";
+
+    // -- bodies: one entry per solid (or shell) with an optimal bounding box --
+    js << ",\"bodies\":[";
+    for (int bi = 1; bi <= bodyMap.Extent(); ++bi) {
+        if (bi > 1) js << ",";
+        js << "{\"index\":" << (bi - 1);
+        Bnd_Box box;
+        try {
+            BRepBndLib::AddOptimal(bodyMap(bi), box);
+        } catch (...) {
+            // Degenerate body — leave bbox absent.
+        }
+        if (!box.IsVoid()) {
+            double xmin, ymin, zmin, xmax, ymax, zmax;
+            box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+            js << ",\"bbox\":{\"min\":[" << xmin << "," << ymin << "," << zmin
+               << "],\"max\":[" << xmax << "," << ymax << "," << zmax << "]}";
+        }
         js << "}";
     }
     js << "]";

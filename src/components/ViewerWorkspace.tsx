@@ -31,8 +31,12 @@ import {
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult } from "@utils/index";
 import { analyzeCadBody, computeMeshStats, type ShapeAnalysis, type RawStockAnalysis } from "@utils/shapeAnalysis";
+import { mapTopologyBodiesToMeshes, type MeshBodyDescriptor } from "@utils/topology";
+import { resolveBodyFeatureState, type FeatureState } from "@utils/features/featureState";
+import { isTauriRuntime } from "@utils/tauriRuntime";
 import { useCad } from "@context/CadContext";
 import { createBlankQuoteWorkflow } from "../db/quoteWorkflowService";
+import { getSetting } from "../db/queries";
 
 function formatRawStockTitle(rawStock: { shape: string }) {
   switch (rawStock.shape) {
@@ -78,6 +82,7 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   const viewerRef = useRef<CadViewerHandle | null>(null);
   const [isMovingToQuote, setIsMovingToQuote] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [featuresEnabled, setFeaturesEnabled] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [displayMode, setDisplayMode] = useState<"solid" | "wireframe">("solid");
   const [showEdges, setShowEdges] = useState(true);
@@ -154,6 +159,22 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
     selectMesh(id);
   }, [clearSelection, selectMesh, selectedId]);
 
+  // Load the "Part features" toggle. Default off; only an explicit `true`
+  // enables the FEATURES panel.
+  useEffect(() => {
+    let active = true;
+    getSetting("feature_recognition_enabled")
+      .then((value) => {
+        if (active) setFeaturesEnabled(value === true);
+      })
+      .catch(() => {
+        /* keep default (enabled) */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -202,6 +223,44 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   );
   const selectedShape = selectedBody?.finishedBody ?? null;
   const selectedRawStock = selectedBody?.rawStock ?? null;
+
+  // Match whole-file BREP topology bodies to imported mesh bodies once per
+  // file, so the selected part can run feature recognition against only its
+  // own body. Null for single-body files, where mapping is unnecessary.
+  const bodyMapping = useMemo(() => {
+    if (!cad?.topology || cad.meshes.length <= 1) return null;
+    const descriptors: MeshBodyDescriptor[] = cad.meshes.map((m) => {
+      let bb = m.geometry.boundingBox;
+      if (!bb) {
+        m.geometry.computeBoundingBox();
+        bb = m.geometry.boundingBox;
+      }
+      return {
+        id: m.id,
+        box: bb
+          ? {
+              min: [bb.min.x, bb.min.y, bb.min.z],
+              max: [bb.max.x, bb.max.y, bb.max.z],
+            }
+          : { min: [0, 0, 0], max: [0, 0, 0] },
+      };
+    });
+    return mapTopologyBodiesToMeshes(cad.topology, descriptors);
+  }, [cad]);
+
+  // Feature recognition for the selected body. Single-body files detect on
+  // the whole topology; multi-body files detect on the mapped per-body slice.
+  // Skipped entirely when the "Part features" setting is off.
+  const featureState = useMemo<FeatureState | null>(() => {
+    if (!cad || !selectedMesh || !featuresEnabled) return null;
+    return resolveBodyFeatureState({
+      topology: cad.topology,
+      meshCount: cad.meshes.length,
+      selectedMeshId: selectedMesh.id,
+      bodyMapping,
+      isTauri: isTauriRuntime(),
+    });
+  }, [cad, selectedMesh, bodyMapping, featuresEnabled]);
 
   const showContainmentNote = useMemo(() => {
     if (!selectedRawStock || selectedRawStock.shape !== "round" || !selectedStats) return false;
@@ -508,7 +567,41 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                   </div>
                 )}
 
-                {/* 3. Geometry Details Collapsible */}
+                {/* 3. Features */}
+                {selectedMesh && featureState && (
+                  <div className="inspector-group">
+                    <div className="inspector-group-title">Features</div>
+                    {featureState.status === "unavailable" ? (
+                      <div className="feature-empty">
+                        <div className="feature-empty-title">Feature recognition unavailable</div>
+                        <div className="feature-empty-reason">{featureState.reason}</div>
+                      </div>
+                    ) : featureState.features.length === 0 ? (
+                      <div className="feature-empty">
+                        <div className="feature-empty-title">No machining features detected</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="feature-chips">
+                          {featureState.summary.groups.map(g => (
+                            <span key={g.type} className="feature-chip">{g.label}</span>
+                          ))}
+                        </div>
+                        <div className="feature-list">
+                          {featureState.features.map((f, i) => (
+                            <div key={`${f.type}-${i}`} className="feature-row">
+                              <span className="feature-row-label">{f.label}</span>
+                              <span className="feature-row-dim">{f.primary}</span>
+                              <span className="feature-row-dim sub">{f.secondary ?? ""}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. Geometry Details Collapsible */}
                 <details className="geometry-details">
                   <summary>Geometry details</summary>
                   {selectedStats ? (

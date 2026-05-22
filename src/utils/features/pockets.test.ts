@@ -156,12 +156,20 @@ describe("detectPockets", () => {
 
     const graph = buildTopologyGraph({ faces, edges, adjacency });
 
-    const start = performance.now();
-    const pockets = detectPockets(graph);
-    const elapsed = performance.now() - start;
+    // Take the fastest of several runs after a warm-up. The minimum is
+    // immune to GC pauses and CPU contention under the full suite, while a
+    // genuine algorithmic regression slows every run, including this one.
+    detectPockets(graph);
+    let pockets: ReturnType<typeof detectPockets> = [];
+    let fastestMs = Infinity;
+    for (let run = 0; run < 5; run++) {
+      const start = performance.now();
+      pockets = detectPockets(graph);
+      fastestMs = Math.min(fastestMs, performance.now() - start);
+    }
 
     expect(pockets).toHaveLength(50);
-    expect(elapsed).toBeLessThan(200);
+    expect(fastestMs).toBeLessThan(200);
   });
 });
 

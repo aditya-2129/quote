@@ -1,8 +1,8 @@
 import { useCatalog } from "@context/CatalogContext";
 import { fmtINR } from "@utils/format";
 import { ShapeIcon } from "@components/ShapeIcon";
-import { Percent } from "lucide-react";
-import { SHAPES, normalizeStock } from "@utils/stock";
+import { Percent, TriangleAlert } from "lucide-react";
+import { SHAPES, normalizeStock, convertStockShape } from "@utils/stock";
 import { partNetMassKg as calculatePartNetMassKg, effectivePartRate, stockMassKg as calculateStockMassKg } from "../../utils/quoteCosting";
 import type { StockPanelProps } from "./types";
 
@@ -15,15 +15,26 @@ export function StockPanel({ part, qty, onChange }: StockPanelProps) {
   const materialCost = sm * rate * qty;
   const netMass = calculatePartNetMassKg(part, materialCosts);
   const util = sm > 0 ? (netMass / sm) * 100 : 0;
-  const utilClass = util >= 50 ? "good" : util >= 25 ? "warn" : "poor";
+  // Utilization is bounded 0–100%: the finished part cannot weigh more than
+  // the blank it is cut from. A higher net than stock means the stock
+  // dimensions are too small to contain the part — flag it instead of
+  // showing an impossible percentage (and an under-quoted material cost).
+  const stockTooSmall = sm > 0 && netMass > sm * 1.001;
+  const utilClass = stockTooSmall
+    ? "bad"
+    : util >= 50
+      ? "good"
+      : util >= 25
+        ? "warn"
+        : "poor";
   const isOverride = part.materialRateOverride != null;
 
   function updateShape(newShape: string) {
-    const newCfg = SHAPES[newShape];
-    const defaults: Record<string, number> = { L: 80, W: 50, H: 25, D: 30, AF: 24 };
-    const newDims: Record<string, number> = {};
-    newCfg.dims.forEach(k => { newDims[k] = stock.dims?.[k] ?? defaults[k]; });
-    onChange({ stock: { shape: newShape, dims: newDims }, materialRateOverride: null });
+    if (newShape === stock.shape) return;
+    onChange({
+      stock: convertStockShape(stock, newShape),
+      materialRateOverride: null,
+    });
   }
   function updateDim(k: string, v: number) {
     onChange({ stock: { ...stock, dims: { ...stock.dims, [k]: v } } });
@@ -65,7 +76,20 @@ export function StockPanel({ part, qty, onChange }: StockPanelProps) {
             </button>
           ))}
         </div>
-        <span className={`util-pill ${utilClass}`}><Percent size={10} /> {util.toFixed(0)}% util</span>
+        <span
+          className={`util-pill ${utilClass}`}
+          title={
+            stockTooSmall
+              ? "Raw stock is smaller than the finished part — increase the stock dimensions."
+              : "Material utilization: finished part weight ÷ raw stock weight."
+          }
+        >
+          {stockTooSmall ? (
+            <><TriangleAlert size={10} /> Stock too small</>
+          ) : (
+            <><Percent size={10} /> {util.toFixed(0)}% util</>
+          )}
+        </span>
       </div>
       <div className={`sp-dims dims-${cfg.dims.length}`}>
         {cfg.dims.map(k => (

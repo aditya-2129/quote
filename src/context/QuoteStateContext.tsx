@@ -159,7 +159,7 @@ export function QuoteStateProvider({ children }: { children: ReactNode }) {
   const [bops, setBops] = useState<Bop[]>([]);
   const [extraCosts, setExtraCosts] = useState<ExtraCost[]>(defaultExtraCosts);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [asmQty, setAsmQty] = useState(25);
+  const [asmQty, setAsmQty] = useState(1);
   const [commercial, setCommercial] = useState(defaultCommercial);
   const [rfq, setRfqState] = useState<Rfq>(defaultRfq);
   // Source of the current project name. New quotes start 'auto' (the New Quote

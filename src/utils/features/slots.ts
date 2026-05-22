@@ -1,5 +1,6 @@
 import {
   findFacesByClass,
+  type BodyBoundingBox,
   type FaceClass,
   type TopologyGraph,
 } from "../topology";
@@ -21,7 +22,18 @@ const PARALLEL_TOLERANCE = 0.01;
 const ORTHOGONAL_TOLERANCE = 0.05;
 const RADIUS_TOLERANCE_MM = 0.05;
 
-export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
+/**
+ * Detect machined slots in a body's BREP topology.
+ *
+ * When `bodyEnvelope` is supplied, candidates whose dimensions match the
+ * body's own bounding box are rejected: a slot is a recessed feature cut
+ * into the stock, never the stock outline itself. Without an envelope the
+ * guard is skipped (synthetic graphs in tests have no body bbox).
+ */
+export function detectSlots(
+  graph: TopologyGraph | undefined,
+  bodyEnvelope?: BodyBoundingBox,
+): Slot[] {
   if (!graph) return [];
 
   const slots: Slot[] = [];
@@ -124,6 +136,10 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
         }
       }
       if (depth === 0) depth = 10.0; // fallback
+
+      // Reject the whole body misread as a slot: a real slot is a recess
+      // strictly smaller than the stock it is cut into.
+      if (consumesBodyEnvelope(L_slot, W_slot, depth, bodyEnvelope)) continue;
 
       // Mark matched
       matchedFaceIds.add(c1.face.id);
@@ -249,6 +265,13 @@ export function detectSlots(graph: TopologyGraph | undefined): Slot[] {
               }
               if (depth === 0) depth = 10.0; // fallback
 
+              // Reject the body envelope misread as a slot: the plate's
+              // own outer faces (a side face as "floor", the remaining box
+              // faces as "walls") otherwise span the full stock outline.
+              if (consumesBodyEnvelope(L_slot, W_slot, depth, bodyEnvelope)) {
+                continue;
+              }
+
               const slotFaceIds = [
                 floor.face.id,
                 p1.w1.face.id,
@@ -315,6 +338,49 @@ function cross(a: Vec3, b: Vec3): Vec3 {
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ];
+}
+
+/** True when two lengths agree within 3% or 0.5 mm, whichever is larger. */
+function dimsClose(a: number, b: number): boolean {
+  return Math.abs(a - b) <= Math.max(0.5, 0.03 * Math.max(a, b));
+}
+
+/**
+ * True when a slot candidate is really the body envelope, not a machined
+ * recess. Two ways a candidate consumes the body:
+ *  - its depth exceeds the largest body extent (a slot cannot be deeper
+ *    than the stock it is cut into), or
+ *  - its three dimensions match the body's three bounding-box extents as
+ *    a multiset (the candidate spans the entire stock outline).
+ *
+ * A genuine slot is a sub-feature, so at least one of its dimensions is
+ * always strictly smaller than the corresponding body extent — through
+ * slots and edge-to-edge channels still pass.
+ */
+function consumesBodyEnvelope(
+  lengthMm: number,
+  widthMm: number,
+  depthMm: number,
+  envelope: BodyBoundingBox | undefined,
+): boolean {
+  if (!envelope) return false;
+
+  const env = [
+    Math.abs(envelope.max[0] - envelope.min[0]),
+    Math.abs(envelope.max[1] - envelope.min[1]),
+    Math.abs(envelope.max[2] - envelope.min[2]),
+  ].sort((a, b) => b - a);
+  const maxEnv = env[0];
+  if (maxEnv <= 0) return false;
+
+  if (depthMm > maxEnv * 1.05) return true;
+
+  const slot = [lengthMm, widthMm, depthMm].sort((a, b) => b - a);
+  return (
+    dimsClose(slot[0], env[0]) &&
+    dimsClose(slot[1], env[1]) &&
+    dimsClose(slot[2], env[2])
+  );
 }
 
 function isParallel(

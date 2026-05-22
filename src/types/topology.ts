@@ -14,6 +14,11 @@ export interface TopologyPayload {
   edges: TopoEdge[];
   /** Face-edge adjacency: for each face, which edges bound it. */
   adjacency: AdjacencyEntry[];
+  /**
+   * Top-level bodies (solids, or shells when the file has no solids).
+   * Absent on topology payloads extracted before per-body grouping existed.
+   */
+  bodies?: TopoBody[];
 }
 
 /** A single BREP face with its wire loops. */
@@ -22,10 +27,34 @@ export interface TopoFace {
   id: string;
   /** 1-based index in the OCCT topology map. */
   index: number;
+  /**
+   * 0-based index of the owning body in `TopologyPayload.bodies`, or
+   * `null`/`undefined` when the face has no body owner.
+   */
+  body?: number | null;
   /** Analytic surface classification for this face. */
   surface: SurfaceClassification;
   /** Wire loops bounding this face (outer + inner/hole loops). */
   wires: TopoWire[];
+}
+
+/**
+ * A top-level body (solid or shell) with its bounding box. Used to match
+ * whole-file topology to individual imported CAD mesh bodies.
+ */
+export interface TopoBody {
+  /** 0-based index, matching `TopoFace.body`. */
+  index: number;
+  /** Optimal axis-aligned bounding box, absent only for degenerate bodies. */
+  bbox?: TopoBbox;
+}
+
+/** An axis-aligned bounding box in model space (mm). */
+export interface TopoBbox {
+  /** Minimum corner [x, y, z]. */
+  min: [number, number, number];
+  /** Maximum corner [x, y, z]. */
+  max: [number, number, number];
 }
 
 export type SurfaceKind =

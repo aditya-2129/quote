@@ -1,6 +1,8 @@
 import type {
   SurfaceClassification,
   SurfaceKind,
+  TopoBody,
+  TopoBbox,
   TopoEdge,
   TopoFace,
   TopoWire,
@@ -251,6 +253,172 @@ export function classifyFace(face: TopoFace): FaceClass {
 
 export function classifyEdge(edge: TopoEdge): EdgeClass {
   return { kind: "spline", edge };
+}
+
+// ── Body-to-mesh mapping ───────────────────────────────────────────────
+//
+// Whole-file BREP topology is extracted as one payload, but the Viewer
+// inspects one selected mesh body at a time. These helpers match the
+// topology's top-level bodies (solids/shells, each with a bounding box)
+// to the imported CAD mesh bodies so feature recognition can run per body.
+
+/** An axis-aligned bounding box, in model space (mm). */
+export interface BodyBoundingBox {
+  min: readonly [number, number, number];
+  max: readonly [number, number, number];
+}
+
+/** A CAD mesh body to be matched against topology bodies. */
+export interface MeshBodyDescriptor {
+  /** Stable mesh ID (`CadMesh.id`). */
+  id: string;
+  /** Bounding box of the mesh geometry. */
+  box: BodyBoundingBox;
+}
+
+// Two bodies are size-compatible when no sorted bbox dimension differs by
+// more than this fraction. Generous enough to absorb tessellation error
+// between an analytic body box and a triangulated mesh box.
+const BODY_SIZE_SIGNATURE_GATE = 0.15;
+
+// A size-compatible pair is only accepted if the bbox centres are within
+// this fraction of the mesh's bbox diagonal — guards against a coordinate
+// frame mismatch silently producing wrong matches.
+const BODY_CENTER_ACCEPT_FRACTION = 0.5;
+
+function boxCenter(box: BodyBoundingBox): Vec3 {
+  return [
+    (box.min[0] + box.max[0]) / 2,
+    (box.min[1] + box.max[1]) / 2,
+    (box.min[2] + box.max[2]) / 2,
+  ];
+}
+
+/** Bbox extents sorted descending — an order-independent size signature. */
+function boxSizeSignature(box: BodyBoundingBox): Vec3 {
+  const dims: Vec3 = [
+    Math.abs(box.max[0] - box.min[0]),
+    Math.abs(box.max[1] - box.min[1]),
+    Math.abs(box.max[2] - box.min[2]),
+  ];
+  return [...dims].sort((a, b) => b - a) as Vec3;
+}
+
+function sizeSignatureDiff(a: Vec3, b: Vec3): number {
+  let worst = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const denom = Math.max(a[i], b[i], 1e-6);
+    worst = Math.max(worst, Math.abs(a[i] - b[i]) / denom);
+  }
+  return worst;
+}
+
+function vecDistance(a: Vec3, b: Vec3): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+/**
+ * Match topology bodies to imported mesh bodies by bounding-box geometry.
+ *
+ * Returns a `meshId → bodyIndex` map. A mesh is omitted from the map when
+ * no topology body is a confident geometric match — the caller should then
+ * surface an honest "could not map" state rather than guessing.
+ */
+export function mapTopologyBodiesToMeshes(
+  topology: TopologyPayload | undefined | null,
+  meshes: readonly MeshBodyDescriptor[],
+): Map<string, number> {
+  const result = new Map<string, number>();
+  const bodies = topology?.bodies;
+  if (!bodies || bodies.length === 0 || meshes.length === 0) return result;
+
+  const bodyInfo = bodies
+    .filter((body): body is TopoBody & { bbox: TopoBbox } =>
+      body.bbox !== undefined,
+    )
+    .map((body) => ({
+      index: body.index,
+      center: boxCenter(body.bbox),
+      size: boxSizeSignature(body.bbox),
+    }));
+  if (bodyInfo.length === 0) return result;
+
+  const meshInfo = meshes.map((mesh) => {
+    const size = boxSizeSignature(mesh.box);
+    return {
+      id: mesh.id,
+      center: boxCenter(mesh.box),
+      size,
+      diagonal: Math.hypot(size[0], size[1], size[2]),
+    };
+  });
+
+  // Build size-compatible candidate pairs, then greedily assign 1:1 from
+  // the closest bbox centres outward. Distinct solids occupy distinct
+  // space, so centre proximity is an almost-unique key; the size gate
+  // disambiguates nested parts that share a centroid.
+  interface Pair {
+    meshId: string;
+    bodyIndex: number;
+    centerDist: number;
+    meshDiagonal: number;
+  }
+  const pairs: Pair[] = [];
+  for (const mesh of meshInfo) {
+    for (const body of bodyInfo) {
+      if (sizeSignatureDiff(mesh.size, body.size) > BODY_SIZE_SIGNATURE_GATE) {
+        continue;
+      }
+      pairs.push({
+        meshId: mesh.id,
+        bodyIndex: body.index,
+        centerDist: vecDistance(mesh.center, body.center),
+        meshDiagonal: mesh.diagonal,
+      });
+    }
+  }
+  pairs.sort((a, b) => a.centerDist - b.centerDist);
+
+  const usedBodies = new Set<number>();
+  for (const pair of pairs) {
+    if (result.has(pair.meshId) || usedBodies.has(pair.bodyIndex)) continue;
+    if (pair.meshDiagonal <= 0) continue;
+    if (pair.centerDist > pair.meshDiagonal * BODY_CENTER_ACCEPT_FRACTION) {
+      continue;
+    }
+    result.set(pair.meshId, pair.bodyIndex);
+    usedBodies.add(pair.bodyIndex);
+  }
+  return result;
+}
+
+/**
+ * Slice a whole-file topology payload down to a single body, keeping only
+ * its faces, their edges, and their adjacency. The result is a self-contained
+ * payload that feeds `buildTopologyGraph` for per-body feature recognition.
+ */
+export function filterTopologyToBody(
+  topology: TopologyPayload,
+  bodyIndex: number,
+): TopologyPayload {
+  const faces = topology.faces.filter((face) => face.body === bodyIndex);
+  const faceIds = new Set(faces.map((face) => face.id));
+  const adjacency = topology.adjacency.filter((entry) =>
+    faceIds.has(entry.face_id),
+  );
+
+  const edgeIds = new Set<string>();
+  for (const entry of adjacency) {
+    for (const edgeId of entry.adjacent_edge_ids) edgeIds.add(edgeId);
+  }
+  for (const face of faces) {
+    for (const wire of face.wires) {
+      for (const edgeId of wire.edge_ids) edgeIds.add(edgeId);
+    }
+  }
+  const edges = topology.edges.filter((edge) => edgeIds.has(edge.id));
+
+  return { faces, edges, adjacency, bodies: topology.bodies };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

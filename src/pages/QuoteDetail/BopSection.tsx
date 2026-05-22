@@ -248,7 +248,7 @@ export const BopSection = memo(function BopSection({ bops, setBops, asmQty }: {
                   </td>
                   <td className="num">
                     <input
-                      className="qty-input"
+                      className="qty-input cost-input"
                       type="number"
                       min={0}
                       step={0.01}

@@ -503,7 +503,7 @@ export const RfqRail = memo(function RfqRail({ parts, asmQty, setAsmQty, commerc
                 customerId={rfq.customerId}
                 onChange={customer => setRfq({ ...rfq, ...customer })}
               />
-              <Field label="Project" value={rfq.project} onChange={v => setRfq({ ...rfq, project: String(v) })} />
+              <Field label="Project Name" value={rfq.project} grid="1/-1" onChange={v => setRfq({ ...rfq, project: String(v) })} />
             </div>
             <div className="rfq-fields" style={{ paddingTop: 8 }}>
               <div className="full"><div className="eyebrow">Commercial · whole quote</div></div>

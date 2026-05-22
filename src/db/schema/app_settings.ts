@@ -23,7 +23,8 @@ export type AppSettingKey =
   | "company_logo_path"   // string (file path)
   | "quote_notes_default" // string
   | "quote_terms"         // string, one term per line
-  | "recent_files_limit"; // number
+  | "recent_files_limit"  // number
+  | "feature_recognition_enabled"; // boolean — show CAD viewer FEATURES panel
 
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").$type<AppSettingKey>().primaryKey(),

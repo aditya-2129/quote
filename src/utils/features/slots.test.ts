@@ -154,6 +154,63 @@ describe("detectSlots", () => {
     expect(slots).toHaveLength(0);
   });
 
+  it("rejects the body envelope misread as a rectangular slot", () => {
+    // Regression: local_test_button_9_cavity.stp Part 12 is a flat
+    // 200 x 200 x 12 plate. Its own box faces (a side face as "floor", the
+    // remaining outer faces as "walls") otherwise span the full stock
+    // outline and were reported as a 200 x 12 x 200 rectangular slot.
+    const graph = buildTopologyGraph(plateBox(200, 200, 12));
+    const envelope = {
+      min: [0, 0, 0] as const,
+      max: [200, 200, 12] as const,
+    };
+
+    // Without the envelope the body box still trips the detector — this
+    // pins the fixture as a genuine false-positive trigger.
+    expect(detectSlots(graph).length).toBeGreaterThan(0);
+
+    // With the body envelope the whole-body candidate is rejected.
+    expect(detectSlots(graph, envelope)).toEqual([]);
+  });
+
+  it("keeps a real slot that is strictly smaller than the body envelope", () => {
+    // A genuine rectangular slot: 40 long x 10 wide x 8 deep cut into a
+    // 200 x 200 x 12 plate. None of its dimensions fill the stock.
+    const graph = buildTopologyGraph({
+      faces: [
+        planeFace("floor", [0, 0, 0], [0, 0, 1]),
+        planeFace("w_long1", [0, 5, 4], [0, 1, 0]),
+        planeFace("w_long2", [0, -5, 4], [0, -1, 0]),
+        planeFace("w_short1", [20, 0, 4], [1, 0, 0]),
+        planeFace("w_short2", [-20, 0, 4], [-1, 0, 0]),
+        planeFace("top", [0, 0, 8], [0, 0, 1]),
+      ],
+      edges: [
+        edge("e_fl_wl1"),
+        edge("e_fl_wl2"),
+        edge("e_fl_ws1"),
+        edge("e_fl_ws2"),
+        edge("e_top_wl1"),
+      ],
+      adjacency: [
+        { face_id: "floor", adjacent_edge_ids: ["e_fl_wl1", "e_fl_wl2", "e_fl_ws1", "e_fl_ws2"] },
+        { face_id: "w_long1", adjacent_edge_ids: ["e_fl_wl1", "e_top_wl1"] },
+        { face_id: "w_long2", adjacent_edge_ids: ["e_fl_wl2"] },
+        { face_id: "w_short1", adjacent_edge_ids: ["e_fl_ws1"] },
+        { face_id: "w_short2", adjacent_edge_ids: ["e_fl_ws2"] },
+        { face_id: "top", adjacent_edge_ids: ["e_top_wl1"] },
+      ],
+    });
+
+    const slots = detectSlots(graph, {
+      min: [-100, -100, 0],
+      max: [100, 100, 12],
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0]).toMatchObject({ kind: "rectangular", lengthMm: 40 });
+  });
+
   it("handles 50 slots under 100ms", () => {
     const faces: TopologyPayload["faces"] = [];
     const edges: TopologyPayload["edges"] = [];
@@ -237,4 +294,35 @@ function planeFace(
 
 function edge(id: string): TopologyPayload["edges"][number] {
   return { id, index: 1 };
+}
+
+/**
+ * A solid rectangular plate spanning [0,0,0]..[lx,ly,lz]: six planar box
+ * faces with full 12-edge adjacency. Used to prove the body envelope is
+ * never misread as a slot.
+ */
+function plateBox(lx: number, ly: number, lz: number): TopologyPayload {
+  return {
+    faces: [
+      planeFace("bottom", [lx / 2, ly / 2, 0], [0, 0, -1]),
+      planeFace("top", [lx / 2, ly / 2, lz], [0, 0, 1]),
+      planeFace("xm", [0, ly / 2, lz / 2], [-1, 0, 0]),
+      planeFace("xp", [lx, ly / 2, lz / 2], [1, 0, 0]),
+      planeFace("ym", [lx / 2, 0, lz / 2], [0, -1, 0]),
+      planeFace("yp", [lx / 2, ly, lz / 2], [0, 1, 0]),
+    ],
+    edges: [
+      "e_top_xm", "e_top_xp", "e_top_ym", "e_top_yp",
+      "e_bot_xm", "e_bot_xp", "e_bot_ym", "e_bot_yp",
+      "e_xm_ym", "e_xm_yp", "e_xp_ym", "e_xp_yp",
+    ].map(edge),
+    adjacency: [
+      { face_id: "top", adjacent_edge_ids: ["e_top_xm", "e_top_xp", "e_top_ym", "e_top_yp"] },
+      { face_id: "bottom", adjacent_edge_ids: ["e_bot_xm", "e_bot_xp", "e_bot_ym", "e_bot_yp"] },
+      { face_id: "xm", adjacent_edge_ids: ["e_top_xm", "e_bot_xm", "e_xm_ym", "e_xm_yp"] },
+      { face_id: "xp", adjacent_edge_ids: ["e_top_xp", "e_bot_xp", "e_xp_ym", "e_xp_yp"] },
+      { face_id: "ym", adjacent_edge_ids: ["e_top_ym", "e_bot_ym", "e_xm_ym", "e_xp_ym"] },
+      { face_id: "yp", adjacent_edge_ids: ["e_top_yp", "e_bot_yp", "e_xm_yp", "e_xp_yp"] },
+    ],
+  };
 }

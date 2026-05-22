@@ -3,6 +3,7 @@ import { isTauriRuntime } from "./tauriRuntime";
 import { DEFAULT_OCCT_OPTIONS } from "./occtOptions";
 import type { CadImportResult, CadMesh, CadTreeNode } from "./cad";
 import type { StepGeometryInput } from "../types";
+import type { TopologyPayload } from "../types/topology";
 
 const CACHE_DIR = "geometry_cache";
 const memoryStore = new Map<string, Uint8Array>();
@@ -72,6 +73,7 @@ type CacheHeader = {
   geometry: StepGeometryInput;
   rootNode: CadTreeNode;
   meshes: SerializedMesh[];
+  topology?: TopologyPayload;
 };
 
 function encodeHeader(header: CacheHeader): Uint8Array {
@@ -149,6 +151,7 @@ function serializeResult(result: CadImportResult): Uint8Array {
     geometry: result.geometry,
     rootNode: result.rootNode,
     meshes,
+    topology: result.topology,
   });
 
   let totalDataLen = 0;
@@ -227,6 +230,7 @@ function deserializeResult(buffer: Uint8Array): CadImportResult {
     rootNode: header.rootNode,
     geometry: header.geometry,
     source: header.source,
+    topology: header.topology,
   };
 }
 

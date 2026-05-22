@@ -3,6 +3,10 @@ import {
   type TopologyGraph,
   neighborsOf,
 } from "../topology";
+import {
+  isOuterEnvelopeDiameter,
+  type FeatureDetectionContext,
+} from "./context";
 
 export interface Thread {
   designation: string; // e.g. "M6x1.0", "1/4-20", or "unknown"
@@ -40,10 +44,23 @@ const STANDARD_THREADS: ThreadSpec[] = [
 const DIAMETER_TOLERANCE = 0.2; // ±0.2 mm
 const PARTIAL_SPAN_THRESHOLD_RAD = Math.PI * 1.9;
 
-export function detectThreads(graph: TopologyGraph | undefined): Thread[] {
+export function detectThreads(
+  graph: TopologyGraph | undefined,
+  context?: FeatureDetectionContext,
+): Thread[] {
   if (!graph) return [];
 
-  const cylinders = findFacesByClass(graph, "cylinder").filter(isClosedEnough);
+  let cylinders = findFacesByClass(graph, "cylinder").filter(isClosedEnough);
+
+  // Never report a thread on the outer body/rim cylinder of a round body —
+  // the stock outer diameter is not a threaded surface.
+  const env = context?.bodyEnvelope;
+  if (env) {
+    cylinders = cylinders.filter(
+      (cyl) => !isOuterEnvelopeDiameter(cyl.radius * 2, env),
+    );
+  }
+
   if (cylinders.length === 0) return [];
 
   const threads: Thread[] = [];
@@ -73,7 +90,15 @@ export function detectThreads(graph: TopologyGraph | undefined): Thread[] {
       concavity = sum < 0 ? "concave" : "convex";
     }
 
-    const gender = concavity === "concave" ? "internal" : "external";
+    // With a known body envelope, every surviving cylinder is an interior
+    // bore (outer-envelope cylinders were filtered out above), so its only
+    // valid thread is internal. The concavity heuristic is unreliable for
+    // real BREP topology and otherwise mislabels bores as external shafts.
+    const gender: "internal" | "external" = env
+      ? "internal"
+      : concavity === "concave"
+        ? "internal"
+        : "external";
     const diameter = cyl.radius * 2;
 
     // Check cylinder diameter against the standard lookup table with a tolerance of ±0.2 mm

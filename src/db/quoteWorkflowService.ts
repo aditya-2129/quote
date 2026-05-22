@@ -824,7 +824,7 @@ export async function createBlankQuoteWorkflow(options: {
     rfqId: null,
     rfq: { project },
     parts: [],
-    asmQty: options.asmQty ?? 25,
+    asmQty: options.asmQty ?? 1,
     commercial: options.commercial ?? { marginPct: 18, taxPct: 0 },
     toolingCost: 0,
     inspectionCost: 0,

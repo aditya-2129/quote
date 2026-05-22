@@ -3,6 +3,10 @@ import {
   type FaceClass,
   type TopologyGraph,
 } from "../topology";
+import {
+  isOuterEnvelopeDiameter,
+  type FeatureDetectionContext,
+} from "./context";
 
 export type HoleKind = "through" | "blind" | "counterbore" | "countersink";
 
@@ -37,12 +41,30 @@ const AXIS_OFFSET_TOLERANCE_MM = 0.01;
 const PARTIAL_SPAN_THRESHOLD_RAD = Math.PI * 1.9;
 const PLANE_PARALLEL_TOLERANCE = 0.01;
 
-export function detectHoles(graph: TopologyGraph | undefined): Hole[] {
+export function detectHoles(
+  graph: TopologyGraph | undefined,
+  context?: FeatureDetectionContext,
+): Hole[] {
   if (!graph) return [];
 
-  const cylinders = findFacesByClass(graph, "cylinder").filter(isClosedEnough);
+  let cylinders = findFacesByClass(graph, "cylinder").filter(isClosedEnough);
+  let cones = findFacesByClass(graph, "cone").filter(isClosedEnough);
+
+  // A hole is an interior cylindrical void. Drop any cylinder or cone that
+  // coincides with the body's outer cross-section — the stock rim / outer
+  // side wall and rim chamfers are not holes, and merging them into a
+  // coaxial group otherwise fabricates a body-diameter counterbore.
+  const env = context?.bodyEnvelope;
+  if (env) {
+    cylinders = cylinders.filter(
+      (c) => !isOuterEnvelopeDiameter(c.radius * 2, env),
+    );
+    cones = cones.filter(
+      (c) => !isOuterEnvelopeDiameter((c.maxRadius ?? c.minRadius ?? 0) * 2, env),
+    );
+  }
+
   if (cylinders.length === 0) return [];
-  const cones = findFacesByClass(graph, "cone").filter(isClosedEnough);
   const planes = findFacesByClass(graph, "plane");
 
   const faceToEdges = new Map<string, Set<string>>();

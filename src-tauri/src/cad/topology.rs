@@ -40,6 +40,11 @@ pub struct TopologyPayload {
     pub edges: Vec<TopoEdge>,
     /// Face-edge adjacency: for each face, which edges bound it.
     pub adjacency: Vec<AdjacencyEntry>,
+    /// Top-level bodies (solids, or shells when the file has no solids).
+    /// Lets the JS feature layer map whole-file topology to individual
+    /// CAD mesh bodies for per-body feature recognition.
+    #[serde(default)]
+    pub bodies: Vec<TopoBody>,
 }
 
 /// A single BREP face with its wire loops.
@@ -49,10 +54,34 @@ pub struct TopoFace {
     pub id: String,
     /// 1-based index in the OCCT topology map.
     pub index: u32,
+    /// 0-based index of the owning body in `TopologyPayload::bodies`,
+    /// or `None` when the face has no body owner.
+    #[serde(default)]
+    pub body: Option<u32>,
     /// Analytic surface classification for this face.
     pub surface: SurfaceClassification,
     /// Wire loops bounding this face (outer + inner/hole loops).
     pub wires: Vec<TopoWire>,
+}
+
+/// A top-level body (solid or shell) with its bounding box. Used to match
+/// whole-file topology to individual imported mesh bodies.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct TopoBody {
+    /// 0-based index, matching `TopoFace::body`.
+    pub index: u32,
+    /// Optimal axis-aligned bounding box, absent only for degenerate bodies.
+    #[serde(default)]
+    pub bbox: Option<TopoBbox>,
+}
+
+/// An axis-aligned bounding box in model space (mm).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct TopoBbox {
+    /// Minimum corner [x, y, z].
+    pub min: [f64; 3],
+    /// Maximum corner [x, y, z].
+    pub max: [f64; 3],
 }
 
 /// A wire loop — an ordered sequence of edges forming a closed boundary.
@@ -337,6 +366,75 @@ mod tests {
             (radius - 15.0).abs() <= 0.01,
             "D30 shaft should have radius 15 mm, got {radius}"
         );
+    }
+
+    #[test]
+    fn extracts_per_body_grouping_for_multi_body_fixtures() {
+        for name in [
+            "local_ps_220129_single_cavity_transfer_tool.stp",
+            "local_single_cavity_transfer_mould.stp",
+        ] {
+            let bytes = load_step_fixture(name);
+            let payload = extract_topology_from_bytes(&bytes)
+                .unwrap_or_else(|e| panic!("{name} should extract topology: {e}"));
+
+            // Body grouping must be populated for a multi-body file.
+            assert!(
+                payload.bodies.len() >= 2,
+                "{name} is multi-body and should yield >= 2 bodies, got {}",
+                payload.bodies.len()
+            );
+
+            // Body indices form a contiguous 0-based range, each with a
+            // non-degenerate bounding box for mesh matching.
+            for (i, body) in payload.bodies.iter().enumerate() {
+                assert_eq!(
+                    body.index as usize, i,
+                    "{name} body indices must be sequential"
+                );
+                let bbox = body
+                    .bbox
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{name} body {i} should have a bbox"));
+                let span = [
+                    bbox.max[0] - bbox.min[0],
+                    bbox.max[1] - bbox.min[1],
+                    bbox.max[2] - bbox.min[2],
+                ];
+                assert!(
+                    span.iter().all(|d| *d > 0.0),
+                    "{name} body {i} bbox should be non-degenerate, got {span:?}"
+                );
+            }
+
+            // Every face's body index, when present, references a real body.
+            let mut bodies_seen = BTreeSet::new();
+            for face in &payload.faces {
+                if let Some(b) = face.body {
+                    assert!(
+                        (b as usize) < payload.bodies.len(),
+                        "{name} face {} references body {b} out of range",
+                        face.id
+                    );
+                    bodies_seen.insert(b);
+                }
+            }
+
+            // Faces must be distributed across multiple bodies — a single
+            // bucket would mean the grouping is not actually working.
+            assert!(
+                bodies_seen.len() >= 2,
+                "{name} faces should span >= 2 bodies, got {}",
+                bodies_seen.len()
+            );
+
+            eprintln!(
+                "{name}: {} bodies, {} faces grouped across {} bodies",
+                payload.bodies.len(),
+                payload.faces.len(),
+                bodies_seen.len()
+            );
+        }
     }
 
     #[test]

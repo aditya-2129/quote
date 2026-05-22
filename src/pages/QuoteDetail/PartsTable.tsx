@@ -124,8 +124,8 @@ export function PartsTable({ parts, setParts, asmQty, selectedId, onSelect, onAd
           <col style={{ width: 28 }} />
           <col />
           <col style={{ width: "15%", minWidth: 80 }} />
-          <col style={{ width: "8%",  minWidth: 50 }} />
-          <col style={{ width: "6%",  minWidth: 36 }} />
+          <col style={{ width: "8%",  minWidth: 56 }} />
+          <col style={{ width: "6%",  minWidth: 40 }} />
           <col style={{ width: "20%", minWidth: 90 }} />
           <col style={{ width: "17%", minWidth: 80 }} />
           <col style={{ width: 64 }} />

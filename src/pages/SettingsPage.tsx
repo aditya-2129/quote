@@ -42,6 +42,7 @@ type SettingsForm = {
   quoteNotesDefault: string;
   quoteTerms: string;
   recentFilesLimit: string;
+  featureRecognitionEnabled: boolean;
 };
 
 type SettingsSection = "general" | "company" | "quotation" | "history" | "diagnostics";
@@ -66,6 +67,7 @@ const DEFAULT_FORM: SettingsForm = {
   quoteNotesDefault: "",
   quoteTerms: "",
   recentFilesLimit: "10",
+  featureRecognitionEnabled: false,
 };
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP"];
@@ -84,6 +86,10 @@ function stringSetting(value: unknown, fallback = "") {
 
 function numberSetting(value: unknown, fallback: string) {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : fallback;
+}
+
+function booleanSetting(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function unitSystemSetting(value: unknown): SettingsForm["unitSystem"] {
@@ -111,6 +117,10 @@ function formFromSettings(settings: Partial<Record<AppSettingKey, unknown>>): Se
     quoteNotesDefault: stringSetting(settings.quote_notes_default),
     quoteTerms: stringSetting(settings.quote_terms),
     recentFilesLimit: numberSetting(settings.recent_files_limit, DEFAULT_FORM.recentFilesLimit),
+    featureRecognitionEnabled: booleanSetting(
+      settings.feature_recognition_enabled,
+      DEFAULT_FORM.featureRecognitionEnabled,
+    ),
   };
 }
 
@@ -389,6 +399,7 @@ export function SettingsPage() {
         setSetting("quote_notes_default", next.quoteNotesDefault),
         setSetting("quote_terms", next.quoteTerms),
         setSetting("recent_files_limit", Number(next.recentFilesLimit)),
+        setSetting("feature_recognition_enabled", next.featureRecognitionEnabled),
       ]);
       setForm(next);
       setSavedForm(next);
@@ -551,6 +562,17 @@ function GeneralSettings({
               <span>%</span>
             </div>
             {errors.defaultTaxPct && <span className="field-error">{errors.defaultTaxPct}</span>}
+          </div>
+        </div>
+
+        <div className="settings-control-row">
+          <div>
+            <div className="settings-control-title">Part features</div>
+            <div className="settings-control-help">Show recognized holes, threads, and pockets in the CAD viewer inspector. Raw material and geometry are unaffected.</div>
+          </div>
+          <div className="settings-radio-group">
+            <label><input type="radio" checked={form.featureRecognitionEnabled} onChange={() => set({ featureRecognitionEnabled: true })} />On</label>
+            <label><input type="radio" checked={!form.featureRecognitionEnabled} onChange={() => set({ featureRecognitionEnabled: false })} />Off</label>
           </div>
         </div>
       </div>

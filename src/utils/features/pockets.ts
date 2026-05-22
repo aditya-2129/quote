@@ -4,6 +4,10 @@ import {
   type FaceClass,
   type TopologyGraph,
 } from "../topology";
+import {
+  isEnvelopeBoundaryPlane,
+  type FeatureDetectionContext,
+} from "./context";
 
 export interface Pocket {
   kind: "open" | "closed";
@@ -121,7 +125,10 @@ function isPointInsideAABB(pt: Vec3, aabb: AABB, tolerance: number = 0.01): bool
   );
 }
 
-export function detectPockets(graph: TopologyGraph | undefined): Pocket[] {
+export function detectPockets(
+  graph: TopologyGraph | undefined,
+  context?: FeatureDetectionContext,
+): Pocket[] {
   if (!graph) return [];
 
   const planes = findFacesByClass(graph, "plane");
@@ -133,6 +140,17 @@ export function detectPockets(graph: TopologyGraph | undefined): Pocket[] {
   for (const floorFace of planes) {
     const O_floor = floorFace.origin;
     const N_floor = normalize(floorFace.normal);
+
+    // A pocket floor is recessed inside the body. A plane lying on the body
+    // envelope boundary is an outer end face of the stock — not a pocket
+    // floor — and pairing it with a rim chamfer otherwise fabricates a
+    // shallow closed pocket.
+    if (
+      context?.bodyEnvelope &&
+      isEnvelopeBoundaryPlane(O_floor, N_floor, context.bodyEnvelope)
+    ) {
+      continue;
+    }
 
     // Find the outer wire of the floor face
     const outerWire = floorFace.face.wires.find((w) => w.is_outer) || floorFace.face.wires[0];
