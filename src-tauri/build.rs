@@ -1,4 +1,14 @@
 fn main() {
+    let vcpkg_root =
+        std::env::var("VCPKG_ROOT").unwrap_or_else(|_| r"C:\vcpkg".to_string());
+    let vcpkg_installed = format!(r"{}\installed\x64-windows", vcpkg_root);
+    let include_dir = format!(r"{}\include\opencascade", vcpkg_installed);
+    let lib_dir = format!(r"{}\lib", vcpkg_installed);
+    let bin_dir = format!(r"{}\bin", vcpkg_installed);
+
+    // Stage DLLs before running tauri_build so that tauri_build can verify resource glob pattern
+    copy_vcpkg_dlls(&bin_dir);
+
     tauri_build::build();
 
     // ── Compile the OCCT C++ topology shim ─────────────────────────────
@@ -6,13 +16,6 @@ fn main() {
     // The shim lives in cpp/topo_shim.cpp and exposes a narrow C ABI.
     // OCCT headers and libraries come from vcpkg.
     // See ADR 0003 for rationale on keeping this boundary small.
-
-    let vcpkg_root =
-        std::env::var("VCPKG_ROOT").unwrap_or_else(|_| r"C:\vcpkg".to_string());
-    let vcpkg_installed = format!(r"{}\installed\x64-windows", vcpkg_root);
-    let include_dir = format!(r"{}\include\opencascade", vcpkg_installed);
-    let lib_dir = format!(r"{}\lib", vcpkg_installed);
-    let bin_dir = format!(r"{}\bin", vcpkg_installed);
 
     // Verify OCCT is actually installed
     if !std::path::Path::new(&include_dir).exists() {
@@ -46,7 +49,6 @@ fn main() {
     // These are the minimum OCCT toolkits needed for STEP import
     // and BREP topology traversal. Ordered by dependency layer.
     println!("cargo:rustc-link-search=native={}", lib_dir);
-    copy_vcpkg_dlls(&bin_dir);
 
     let occt_libs = [
         // Foundation
@@ -97,6 +99,10 @@ fn copy_vcpkg_dlls(bin_dir: &str) {
     let deps_dir = profile_dir.join("deps");
     let _ = std::fs::create_dir_all(&deps_dir);
 
+    // Staging directory for Tauri resources (src-tauri/resources)
+    let resources_dir = std::path::PathBuf::from("resources");
+    let _ = std::fs::create_dir_all(&resources_dir);
+
     let Ok(entries) = std::fs::read_dir(bin_dir) else {
         return;
     };
@@ -112,5 +118,6 @@ fn copy_vcpkg_dlls(bin_dir: &str) {
 
         let _ = std::fs::copy(&path, profile_dir.join(file_name));
         let _ = std::fs::copy(&path, deps_dir.join(file_name));
+        let _ = std::fs::copy(&path, resources_dir.join(file_name));
     }
 }
