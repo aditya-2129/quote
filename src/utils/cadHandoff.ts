@@ -1,27 +1,32 @@
 import type { CadImportResult } from "./cad";
 import type { Part, Stock } from "./quoteTypes";
 import { groupIdenticalMeshes } from "./meshFingerprint";
-import { analyzeShape, computeMeshStats } from "./shapeAnalysis";
+import { analyzeRawStock, computeMeshStats } from "./shapeAnalysis";
 
+// Quote handoff always uses raw-material stock, never the finished-body
+// classification: a featured body still needs a buyable blank.
 function stockFromGeometry(geometry: import("three").BufferGeometry): Stock {
-  const shape = analyzeShape(geometry);
-  if (shape.kind === "cylinder") {
+  const rawStock = analyzeRawStock(geometry);
+  if (rawStock.shape === "round") {
+    return { shape: "round", dims: { D: rawStock.dims.D, L: rawStock.dims.L } };
+  }
+  if (rawStock.shape === "hex") {
+    return { shape: "hex", dims: { AF: rawStock.dims.AF, L: rawStock.dims.L } };
+  }
+  if (rawStock.shape === "rect") {
     return {
-      shape: "round",
-      dims: {
-        D: round1(shape.outerDiaMm),
-        L: round1(shape.lengthMm),
-      },
+      shape: "rect",
+      dims: { L: rawStock.dims.L, W: rawStock.dims.W, H: rawStock.dims.H },
     };
   }
-  if (shape.kind === "hex") {
-    return { shape: "hex", dims: { AF: round1(shape.afMm), L: round1(shape.lengthMm) } };
-  }
-  const sorted = [shape.xMm, shape.yMm, shape.zMm].sort((a, b) => b - a);
-  return { shape: "rect", dims: { L: round1(sorted[0]), W: round1(sorted[1]), H: round1(sorted[2]) } };
+  // Degenerate envelope — fall back to sorted raw envelope dimensions.
+  const sorted = [
+    rawStock.dims.xMm,
+    rawStock.dims.yMm,
+    rawStock.dims.zMm,
+  ].sort((a, b) => b - a);
+  return { shape: "rect", dims: { L: sorted[0], W: sorted[1], H: sorted[2] } };
 }
-
-function round1(n: number) { return Math.round(n * 10) / 10; }
 
 export function cadResultToParts(cad: CadImportResult): Part[] {
   const byId = new Map(cad.meshes.map(m => [m.id, m]));

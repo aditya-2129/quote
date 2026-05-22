@@ -79,3 +79,5 @@ errors.txt
 design_bundle/
 design_extracted.json
 tools/*/target/
+public/inspection/
+tmp/

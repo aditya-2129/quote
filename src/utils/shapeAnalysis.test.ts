@@ -3,7 +3,13 @@ import * as THREE from "three";
 import * as path from "path";
 import process from "process";
 import { loadStepFixture } from "./__testHelpers__/loadStepFixture";
-import { analyzeShape, type ShapeAnalysis } from "./shapeAnalysis";
+import {
+  analyzeCadBody,
+  analyzeRawStock,
+  analyzeShape,
+  computeMeshStats,
+  type ShapeAnalysis,
+} from "./shapeAnalysis";
 import { buildTopologyGraph } from "./topology";
 import type { TopologyPayload } from "@/types/topology";
 
@@ -26,7 +32,13 @@ interface ExpectedBox {
   yMm: number;
   zMm: number;
 }
-type ExpectedShape = ExpectedCylinder | ExpectedHex | ExpectedBox;
+interface ExpectedComplex {
+  kind: "complex";
+  xMm: number;
+  yMm: number;
+  zMm: number;
+}
+type ExpectedShape = ExpectedCylinder | ExpectedHex | ExpectedBox | ExpectedComplex;
 
 /**
  * Curated ground truth for single-body STEP fixtures, locked to actual
@@ -34,13 +46,9 @@ type ExpectedShape = ExpectedCylinder | ExpectedHex | ExpectedBox;
  * on 2026-05-21 using the same OCCT tessellation settings the production loader
  * uses (linearDeflection 0.001, bounding_box_ratio, angularDeflection 0.5).
  *
- * IMPORTANT: self_hex_bar.step is recorded as "box" because OCCT produces only
- * 20 triangles for a solid hex prism with these tessellation settings — fewer
- * than analyzeShape's 16-side-face threshold. This is a real algorithm
- * limitation worth tracking. Hex prisms with bores (self_hex_nut, self_hex_standoff)
- * pick up enough side-face triangles from the bore wall to cross the threshold.
- * Do NOT add a subdivision hack to force "hex" on the bar — that would mask the
- * limitation rather than characterize it.
+ * IMPORTANT: self_hex_bar.step is a low-tessellation hex prism. The classifier
+ * must still identify the whole-body shape from its planar side-face normals
+ * instead of falling back to complex just because the mesh has few triangles.
  */
 const SHAPE_GROUND_TRUTH: Record<string, ExpectedShape> = {
   "self_round_shaft.step": {
@@ -63,7 +71,7 @@ const SHAPE_GROUND_TRUTH: Record<string, ExpectedShape> = {
   },
   "self_stepped_shoulder_shaft.step": {
     kind: "cylinder",
-    outerDiaMm: 23.942509031829193,
+    outerDiaMm: 35.97806930541992,
     innerDiaMm: null,
     lengthMm: 195,
   },
@@ -74,13 +82,9 @@ const SHAPE_GROUND_TRUTH: Record<string, ExpectedShape> = {
     lengthMm: 50,
   },
   "self_hex_bar.step": {
-    // Documented limitation: 20-triangle tessellation falls below the 16
-    // side-face threshold; algorithm falls back to box. Bounding box reflects
-    // hex oriented with vertex along +X (vertex-to-vertex = AF / cos30°).
-    kind: "box",
-    xMm: 30,
-    yMm: 25.980762481689453,
-    zMm: 120,
+    kind: "hex",
+    afMm: 25.980762481689453,
+    lengthMm: 120,
   },
   "self_hex_nut.step": {
     kind: "hex",
@@ -143,6 +147,10 @@ function expectDimsClose(
     checkClose(actual.xMm, expected.xMm, "xMm");
     checkClose(actual.yMm, expected.yMm, "yMm");
     checkClose(actual.zMm, expected.zMm, "zMm");
+  } else if (expected.kind === "complex" && actual.kind === "complex") {
+    checkClose(actual.xMm, expected.xMm, "xMm");
+    checkClose(actual.yMm, expected.yMm, "yMm");
+    checkClose(actual.zMm, expected.zMm, "zMm");
   }
 }
 
@@ -185,8 +193,23 @@ describe("analyzeShape golden classification sweep", () => {
     }
   });
 
+  it("never classifies a complex-shaped fixture as cylinder, hex, or box", async () => {
+    const complexFixtures = Object.entries(SHAPE_GROUND_TRUTH)
+      .filter(([, exp]) => exp.kind === "complex")
+      .map(([name]) => name);
+
+    for (const fixture of complexFixtures) {
+      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixture));
+      const result = analyzeShape(meshes[0].geometry);
+      expect(
+        result.kind,
+        `false positive: ${fixture} classified as ${result.kind}, expected complex`,
+      ).toBe("complex");
+    }
+  });
+
   it("meets acceptance minimums: ≥3 cylinder, ≥2 hex, ≥5 box fixtures classified", async () => {
-    const counts = { cylinder: 0, hex: 0, box: 0 };
+    const counts = { cylinder: 0, hex: 0, box: 0, complex: 0 };
     for (const fixture of Object.keys(SHAPE_GROUND_TRUTH)) {
       const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixture));
       const result = analyzeShape(meshes[0].geometry);
@@ -260,6 +283,123 @@ describe("analyzeShape topology path", () => {
     expect(result).toEqual({ kind: "box", xMm: 12, yMm: 24, zMm: 36 });
     expect(debugSpy).toHaveBeenCalledWith("[shapeAnalysis] path=mesh");
     debugSpy.mockRestore();
+  });
+});
+
+describe("analyzeRawStock raw-material inference", () => {
+  it.each(Object.keys(SHAPE_GROUND_TRUTH))(
+    "%s: raw-stock shape follows the envelope, not finished complexity",
+    async (fixtureName) => {
+      const exp = SHAPE_GROUND_TRUTH[fixtureName];
+      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixtureName));
+      const { rawStock } = analyzeCadBody(meshes[0].geometry);
+      const expectedShape =
+        exp.kind === "cylinder"
+          ? "round"
+          : exp.kind === "hex"
+            ? "hex"
+            : "rect";
+      expect(rawStock.shape, `${fixtureName} raw stock`).toBe(expectedShape);
+    },
+  );
+
+  it("round bars use the envelope max diameter and length", async () => {
+    for (const name of [
+      "self_round_shaft.step",
+      "self_round_tube.step",
+      "self_stepped_shoulder_shaft.step",
+    ]) {
+      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, name));
+      const stats = computeMeshStats(meshes[0].geometry);
+      const dims = [
+        stats.boundingBoxMm.x,
+        stats.boundingBoxMm.y,
+        stats.boundingBoxMm.z,
+      ].sort((a, b) => b - a);
+      const raw = analyzeRawStock(meshes[0].geometry);
+      expect(raw.shape, name).toBe("round");
+      if (raw.shape !== "round") continue;
+      expect(Math.abs(raw.dims.L - dims[0]), `${name} L`).toBeLessThanOrEqual(
+        0.5,
+      );
+      expect(Math.abs(raw.dims.D - dims[1]), `${name} D`).toBeLessThanOrEqual(
+        0.5,
+      );
+    }
+  });
+
+  it("hex bars use across-flats and length", async () => {
+    const hexes: Array<[string, number, number]> = [
+      ["self_hex_bar.step", 25.980762481689453, 120],
+      ["self_hex_nut.step", 17, 8],
+      ["self_hex_standoff.step", 20, 25],
+    ];
+    for (const [name, af, len] of hexes) {
+      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, name));
+      const raw = analyzeRawStock(meshes[0].geometry);
+      expect(raw.shape, name).toBe("hex");
+      if (raw.shape !== "hex") continue;
+      expect(Math.abs(raw.dims.AF - af), `${name} AF`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(raw.dims.L - len), `${name} L`).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("plates and blocks use the sorted envelope as rect stock", async () => {
+    for (const [name, exp] of Object.entries(SHAPE_GROUND_TRUTH)) {
+      if (exp.kind !== "box") continue;
+      const meshes = await loadStepFixture(path.join(FIXTURES_DIR, name));
+      const stats = computeMeshStats(meshes[0].geometry);
+      const dims = [
+        stats.boundingBoxMm.x,
+        stats.boundingBoxMm.y,
+        stats.boundingBoxMm.z,
+      ].sort((a, b) => b - a);
+      const raw = analyzeRawStock(meshes[0].geometry);
+      expect(raw.shape, name).toBe("rect");
+      if (raw.shape !== "rect") continue;
+      expect(Math.abs(raw.dims.L - dims[0]), `${name} L`).toBeLessThanOrEqual(
+        0.5,
+      );
+      expect(Math.abs(raw.dims.W - dims[1]), `${name} W`).toBeLessThanOrEqual(
+        0.5,
+      );
+      expect(Math.abs(raw.dims.H - dims[2]), `${name} H`).toBeLessThanOrEqual(
+        0.5,
+      );
+    }
+  });
+
+  it("degenerate geometry yields unknown raw stock", () => {
+    const flat = new THREE.BufferGeometry();
+    flat.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        [0, 0, 0, 10, 0, 0, 10, 5, 0, 0, 5, 0],
+        3,
+      ),
+    );
+    const raw = analyzeRawStock(flat);
+    expect(raw.shape).toBe("unknown");
+  });
+
+  it("local_single_cavity_transfer_mould.stp Part 5 remains round stock with containment diameter", async () => {
+    const fixture = "local_single_cavity_transfer_mould.stp";
+    const meshes = await loadStepFixture(path.join(FIXTURES_DIR, fixture));
+    // Part 5 is at index 4 (0-indexed)
+    const part5 = meshes[4];
+    expect(part5, "Part 5 mesh should exist").toBeDefined();
+
+    const raw = analyzeRawStock(part5.geometry);
+    expect(raw.shape).toBe("round");
+    if (raw.shape !== "round") return;
+
+    const expectClose = (actual: number, expected: number, label: string) => {
+      expect(Math.abs(actual - expected), `${label}: expected ${expected}, got ${actual}`).toBeLessThanOrEqual(0.5);
+    };
+
+    expectClose(raw.dims.L, 187.66, "Part 5 length L");
+    expect(raw.dims.D).toBeGreaterThan(60.00);
+    expectClose(raw.dims.D, 81.96, "Part 5 containment diameter D");
   });
 });
 

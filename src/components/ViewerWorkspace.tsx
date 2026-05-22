@@ -30,7 +30,7 @@ import {
 } from "@components/ViewIcons";
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult } from "@utils/index";
-import { analyzeShape, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
+import { analyzeCadBody, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
 import { useCad } from "@context/CadContext";
 import { createBlankQuoteWorkflow } from "../db/quoteWorkflowService";
 
@@ -167,10 +167,12 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
     () => selectedMesh ? computeMeshStats(selectedMesh.geometry) : null,
     [selectedMesh],
   );
-  const selectedShape = useMemo(
-    () => selectedMesh ? analyzeShape(selectedMesh.geometry) : null,
+  const selectedBody = useMemo(
+    () => selectedMesh ? analyzeCadBody(selectedMesh.geometry) : null,
     [selectedMesh],
   );
+  const selectedShape = selectedBody?.finishedBody ?? null;
+  const selectedRawStock = selectedBody?.rawStock ?? null;
 
   const toggleHide = (id: string) => {
     setHiddenIds(cur => {
@@ -425,12 +427,12 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
             <>
               <div className="insp-section">
                 <h4>Geometry {selectedStats && <span style={{ fontWeight: 400, color: "var(--text-3)", fontSize: 10 }}>— selected part</span>}</h4>
-                {selectedMesh && selectedShape && (
+                {selectedMesh && selectedRawStock && (
                   <div className="insp-part-summary">
                     <span className="swatch" style={{ background: selectedMesh.color }} />
                     <span className="name">{selectedMesh.name}</span>
                     <span className="id">
-                      {selectedShape.kind === "cylinder" ? "ø cyl" : selectedShape.kind === "hex" ? "hex" : "box"}
+                      {selectedRawStock.shape === "round" ? "round" : selectedRawStock.shape === "hex" ? "hex" : selectedRawStock.shape === "rect" ? "rect" : "unknown"}
                     </span>
                   </div>
                 )}
@@ -441,17 +443,26 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                   </div>
                 </div>
                 {selectedStats ? <>
+                  {selectedRawStock && <>
+                    <div className="kv"><span className="k">Raw stock</span><span className="v">{selectedRawStock.shape === "round" ? "Round" : selectedRawStock.shape === "hex" ? "Hex" : selectedRawStock.shape === "rect" ? "Rect" : "Unknown"}</span></div>
+                    {selectedRawStock.shape === "round" && <>
+                      <div className="kv"><span className="k">Outer Ø</span><span className="v">{selectedRawStock.dims.D.toFixed(2)} mm</span></div>
+                      <div className="kv"><span className="k">Length</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
+                    </>}
+                    {selectedRawStock.shape === "hex" && <>
+                      <div className="kv"><span className="k">AF</span><span className="v">{selectedRawStock.dims.AF.toFixed(2)} mm</span></div>
+                      <div className="kv"><span className="k">Length</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
+                    </>}
+                    {selectedRawStock.shape === "rect" && <>
+                      <div className="kv"><span className="k">Stock · L</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
+                      <div className="kv"><span className="k">Stock · W</span><span className="v">{selectedRawStock.dims.W.toFixed(2)} mm</span></div>
+                      <div className="kv"><span className="k">Stock · H</span><span className="v">{selectedRawStock.dims.H.toFixed(2)} mm</span></div>
+                    </>}
+                  </>}
                   <div className="kv"><span className="k">Bounding · X</span><span className="v">{selectedStats.boundingBoxMm.x.toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Y</span><span className="v">{selectedStats.boundingBoxMm.y.toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Z</span><span className="v">{selectedStats.boundingBoxMm.z.toFixed(2)} mm</span></div>
-                  {selectedShape?.kind === "cylinder" && <>
-                    <div className="kv"><span className="k">Outer Ø</span><span className="v">{selectedShape.outerDiaMm.toFixed(2)} mm</span></div>
-                    <div className="kv"><span className="k">Length</span><span className="v">{selectedShape.lengthMm.toFixed(2)} mm</span></div>
-                  </>}
-                  {selectedShape?.kind === "hex" && <>
-                    <div className="kv"><span className="k">AF</span><span className="v">{selectedShape.afMm.toFixed(2)} mm</span></div>
-                    <div className="kv"><span className="k">Length</span><span className="v">{selectedShape.lengthMm.toFixed(2)} mm</span></div>
-                  </>}
+                  {selectedShape && <div className="kv"><span className="k">Finished body</span><span className="v">{selectedShape.kind}</span></div>}
                 </> : <>
                   <div className="kv"><span className="k">Bounding · X</span><span className="v">{(geo.boundingBoxMm?.x ?? 0).toFixed(2)} mm</span></div>
                   <div className="kv"><span className="k">Bounding · Y</span><span className="v">{(geo.boundingBoxMm?.y ?? 0).toFixed(2)} mm</span></div>

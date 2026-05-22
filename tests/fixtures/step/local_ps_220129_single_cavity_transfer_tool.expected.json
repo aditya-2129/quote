@@ -40,6 +40,26 @@
     "triangleCount": 27139,
     "vertexCount": 19453
   },
+  "dimensionContract": {
+    "note": "Raw material shape and size must be derived from the body envelope. Feature diameters (bores, bosses, grooves, pocket walls) must NOT replace stock diameter.",
+    "bodyEnvelopes": [
+      { "label": "Part 1", "boundingBoxMm": { "x": 100.00, "y": 100.00, "z": 49.93 }, "rawStock": { "shape": "cylinder", "diameterMm": 100.00, "lengthMm": 49.93 } },
+      { "label": "Part 2", "boundingBoxMm": { "x": 100.00, "y": 100.00, "z": 46.60 }, "rawStock": { "shape": "cylinder", "diameterMm": 100.00, "lengthMm": 46.60 } },
+      { "label": "Part 3", "boundingBoxMm": { "x": 100.00, "y": 100.00, "z": 29.02 }, "rawStock": { "shape": "cylinder", "diameterMm": 100.00, "lengthMm": 29.02 } },
+      { "label": "Part 4", "boundingBoxMm": { "x": 100.00, "y": 100.00, "z": 50.00 }, "rawStock": { "shape": "cylinder", "diameterMm": 100.00, "lengthMm": 50.00 } },
+      { "label": "Part 5", "boundingBoxMm": { "x": 39.45, "y": 39.47, "z": 30.70 }, "rawStock": { "shape": "cylinder", "diameterMm": 39.47, "lengthMm": 30.70 } },
+      { "label": "Part 6", "boundingBoxMm": { "x": 18.22, "y": 18.22, "z": 32.12 }, "rawStock": { "shape": "cylinder", "diameterMm": 18.22, "lengthMm": 32.12 } }
+    ],
+    "observedBadDiameters": {
+      "note": "Feature or partial-surface diameters observed before the raw-stock fix. These values must not replace envelope-derived stock diameter.",
+      "Part 1": "24.86 mm (feature diameter << 100 mm envelope)",
+      "Part 2": "99.89 mm (outer wall of disc, may still show as cylinder)",
+      "Part 3": "59.58 mm (feature diameter << 100 mm envelope)",
+      "Part 4": "69.98 mm (feature diameter < 100 mm envelope)",
+      "Part 5": "33.27 mm (feature diameter < 39.45 mm envelope)",
+      "Part 6": "13.66 mm (feature diameter << 18.22 mm envelope)"
+    }
+  },
   "groundTruth": {
     "method": "Curated fixture metadata plus OCCT import smoke check using the app tessellation settings. Existing local fixtures preserve computed import baselines for later regression tests.",
     "reviewedBy": "Codex",
