@@ -30,9 +30,38 @@ import {
 } from "@components/ViewIcons";
 import { CadViewer, type CadViewerHandle } from "@components/CadViewer";
 import type { CadImportResult } from "@utils/index";
-import { analyzeCadBody, computeMeshStats, type ShapeAnalysis } from "@utils/shapeAnalysis";
+import { analyzeCadBody, computeMeshStats, type ShapeAnalysis, type RawStockAnalysis } from "@utils/shapeAnalysis";
 import { useCad } from "@context/CadContext";
 import { createBlankQuoteWorkflow } from "../db/quoteWorkflowService";
+
+function formatRawStockTitle(rawStock: { shape: string }) {
+  switch (rawStock.shape) {
+    case "round": return "Round bar stock";
+    case "hex": return "Hex bar stock";
+    case "rect": return "Rect block stock";
+    default: return "Unknown stock";
+  }
+}
+
+function formatRawStockDims(rawStock: RawStockAnalysis | null) {
+  if (!rawStock || !rawStock.dims) return "";
+  switch (rawStock.shape) {
+    case "round": {
+      const { D, L } = rawStock.dims;
+      return `Ø ${D.toFixed(2)} mm × ${L.toFixed(2)} mm`;
+    }
+    case "hex": {
+      const { AF, L } = rawStock.dims;
+      return `AF ${AF.toFixed(2)} mm × ${L.toFixed(2)} mm`;
+    }
+    case "rect": {
+      const { L, W, H } = rawStock.dims;
+      return `${L.toFixed(2)} × ${W.toFixed(2)} × ${H.toFixed(2)} mm`;
+    }
+    default:
+      return "";
+  }
+}
 
 export function ViewerWorkspace({ cad, isImporting, onFile }: {
   cad: CadImportResult | null;
@@ -173,6 +202,21 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
   );
   const selectedShape = selectedBody?.finishedBody ?? null;
   const selectedRawStock = selectedBody?.rawStock ?? null;
+
+  const showContainmentNote = useMemo(() => {
+    if (!selectedRawStock || selectedRawStock.shape !== "round" || !selectedStats) return false;
+    const { D, L } = selectedRawStock.dims;
+    const { x, y, z } = selectedStats.boundingBoxMm;
+    const diffs = [
+      { diff: Math.abs(x - L), val: x },
+      { diff: Math.abs(y - L), val: y },
+      { diff: Math.abs(z - L), val: z }
+    ];
+    diffs.sort((a, b) => a.diff - b.diff);
+    const c1 = diffs[1].val;
+    const c2 = diffs[2].val;
+    return D > c1 + 0.5 && D > c2 + 0.5;
+  }, [selectedRawStock, selectedStats]);
 
   const toggleHide = (id: string) => {
     setHiddenIds(cur => {
@@ -436,38 +480,52 @@ export function ViewerWorkspace({ cad, isImporting, onFile }: {
                     </span>
                   </div>
                 )}
-                <div className="insp-tile-row">
-                  <div className="insp-tile">
-                    <div className="label">Volume</div>
-                    <div className="value">{((selectedStats ? selectedStats.volumeMm3 : (geo.volumeMm3 ?? 0)) / 1000).toFixed(2)} <span className="muted">cm³</span></div>
+
+                {/* 1. Raw Material Panel */}
+                {selectedMesh && selectedRawStock && (
+                  <div className="raw-stock-panel">
+                    <div className="raw-stock-head">Raw material</div>
+                    <div className="raw-stock-shape">{formatRawStockTitle(selectedRawStock)}</div>
+                    <div className="raw-stock-dims">{formatRawStockDims(selectedRawStock)}</div>
+                    {showContainmentNote && (
+                      <div className="raw-stock-note">Diameter contains flange/corner extent</div>
+                    )}
                   </div>
-                </div>
-                {selectedStats ? <>
-                  {selectedRawStock && <>
-                    <div className="kv"><span className="k">Raw stock</span><span className="v">{selectedRawStock.shape === "round" ? "Round" : selectedRawStock.shape === "hex" ? "Hex" : selectedRawStock.shape === "rect" ? "Rect" : "Unknown"}</span></div>
-                    {selectedRawStock.shape === "round" && <>
-                      <div className="kv"><span className="k">Outer Ø</span><span className="v">{selectedRawStock.dims.D.toFixed(2)} mm</span></div>
-                      <div className="kv"><span className="k">Length</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
-                    </>}
-                    {selectedRawStock.shape === "hex" && <>
-                      <div className="kv"><span className="k">AF</span><span className="v">{selectedRawStock.dims.AF.toFixed(2)} mm</span></div>
-                      <div className="kv"><span className="k">Length</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
-                    </>}
-                    {selectedRawStock.shape === "rect" && <>
-                      <div className="kv"><span className="k">Stock · L</span><span className="v">{selectedRawStock.dims.L.toFixed(2)} mm</span></div>
-                      <div className="kv"><span className="k">Stock · W</span><span className="v">{selectedRawStock.dims.W.toFixed(2)} mm</span></div>
-                      <div className="kv"><span className="k">Stock · H</span><span className="v">{selectedRawStock.dims.H.toFixed(2)} mm</span></div>
-                    </>}
-                  </>}
-                  <div className="kv"><span className="k">Bounding · X</span><span className="v">{selectedStats.boundingBoxMm.x.toFixed(2)} mm</span></div>
-                  <div className="kv"><span className="k">Bounding · Y</span><span className="v">{selectedStats.boundingBoxMm.y.toFixed(2)} mm</span></div>
-                  <div className="kv"><span className="k">Bounding · Z</span><span className="v">{selectedStats.boundingBoxMm.z.toFixed(2)} mm</span></div>
-                  {selectedShape && <div className="kv"><span className="k">Finished body</span><span className="v">{selectedShape.kind}</span></div>}
-                </> : <>
-                  <div className="kv"><span className="k">Bounding · X</span><span className="v">{(geo.boundingBoxMm?.x ?? 0).toFixed(2)} mm</span></div>
-                  <div className="kv"><span className="k">Bounding · Y</span><span className="v">{(geo.boundingBoxMm?.y ?? 0).toFixed(2)} mm</span></div>
-                  <div className="kv"><span className="k">Bounding · Z</span><span className="v">{(geo.boundingBoxMm?.z ?? 0).toFixed(2)} mm</span></div>
-                </>}
+                )}
+
+                {/* 2. Part Properties */}
+                {selectedMesh && selectedStats && selectedShape && (
+                  <div className="inspector-group">
+                    <div className="inspector-group-title">Part Properties</div>
+                    <div className="kv">
+                      <span className="k">Volume</span>
+                      <span className="v">{(selectedStats.volumeMm3 / 1000).toFixed(2)} <span style={{ fontSize: "10.5px", color: "var(--text-3)" }}>cm³</span></span>
+                    </div>
+                    <div className="kv" style={{ borderTop: "1px dashed var(--divider)" }}>
+                      <span className="k">Finished body</span>
+                      <span className="v">{selectedShape.kind}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Geometry Details Collapsible */}
+                <details className="geometry-details">
+                  <summary>Geometry details</summary>
+                  {selectedStats ? (
+                    <div className="geometry-details-row">
+                      Bounding box: {selectedStats.boundingBoxMm.x.toFixed(2)} × {selectedStats.boundingBoxMm.y.toFixed(2)} × {selectedStats.boundingBoxMm.z.toFixed(2)} mm
+                    </div>
+                  ) : (
+                    <>
+                      <div className="geometry-details-row">
+                        Volume: {((geo.volumeMm3 ?? 0) / 1000).toFixed(2)} cm³
+                      </div>
+                      <div className="geometry-details-row">
+                        Bounding box: {(geo.boundingBoxMm?.x ?? 0).toFixed(2)} × {(geo.boundingBoxMm?.y ?? 0).toFixed(2)} × {(geo.boundingBoxMm?.z ?? 0).toFixed(2)} mm
+                      </div>
+                    </>
+                  )}
+                </details>
               </div>
             </>
           ) : (

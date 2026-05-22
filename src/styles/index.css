@@ -797,6 +797,97 @@ a { text-decoration: none; color: inherit; }
 .insp-selection .grid .k { color: var(--text-2); }
 .insp-selection .grid .v { font-family: var(--font-mono); text-align: right; }
 
+/* Viewer Inspector Custom raw stock and details styles */
+.raw-stock-panel {
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.raw-stock-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  margin-bottom: 6px;
+}
+.raw-stock-shape {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 6px;
+}
+.raw-stock-dims {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 4px;
+  font-feature-settings: "tnum";
+}
+.raw-stock-note {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+.inspector-group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.inspector-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.geometry-details {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.geometry-details summary {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
+  outline: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.geometry-details summary::-webkit-details-marker {
+  display: none;
+}
+.geometry-details summary::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 9px;
+  color: var(--text-4);
+}
+.geometry-details[open] summary::before {
+  transform: rotate(90deg);
+}
+.geometry-details-row {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  padding-left: 14px;
+  font-feature-settings: "tnum";
+}
+
 @media (max-width: 1280px) {
   .viewer-grid {
     grid-template-columns: minmax(204px, 232px) minmax(320px, 1fr) minmax(232px, 268px);
