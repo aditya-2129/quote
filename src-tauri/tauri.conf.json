@@ -48,7 +48,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCNTJGMjc4OUZDQTgzQzAKUldUQWc4cWZlUEpTU3c2enZFeG9KckNrdDNwMzQ2WmxKQWloaWNnZVR5MWc0Wmt6RUVqY0oxVXAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVBQTBDRDM0MjIzQ0QyMEMKUldRTTBqd2lOTTJnV2treEx2eTJQaVZJcFdlL1pjOEdrMXpYMGUyQU1RRjZPZ01OZ3JRODZubXAK",
       "endpoints": [
         "https://github.com/aditya-2129/quote/releases/latest/download/latest.json"
       ],
