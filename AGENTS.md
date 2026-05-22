@@ -9,8 +9,6 @@ Manufacturing Quote App: a Tauri 2 + React 19 desktop tool for importing STEP fi
 - UI/design guidance: `docs/design-system.md`
 - Agent workflow: `docs/agents/`
 - Architectural decisions: `docs/adr/`
-- Current CAD dimension-correctness roadmap: `plans/dimension-correctness-roadmap.md`
-- Local roadmap issue index: `issues/README.md`
 
 Do not eagerly read every doc. Open the smallest relevant file for the task.
 

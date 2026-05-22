@@ -19,7 +19,7 @@ Recommended conventions:
 
 Use local markdown when planning is not ready to publish to GitHub Issues yet.
 
-For active roadmap-level work, use the top-level planning folders:
+For active roadmap-level work that should stay local before publishing, use the top-level planning folders:
 
 - Plans: `plans/<roadmap-or-feature>.md`
 - Issues: `issues/<NNN>-<slug>.md`
@@ -29,14 +29,6 @@ For active roadmap-level work, use the top-level planning folders:
 For scratch experiments that are not part of the active roadmap, use `.scratch/<feature-slug>/`.
 
 Local drafts can later be copied into GitHub Issues.
-
-## Current Local Roadmap
-
-The CAD dimension-correctness roadmap is tracked locally until it is ready to publish:
-
-- Plan: `plans/dimension-correctness-roadmap.md`
-- Local issue index: `issues/README.md`
-- Issue status mapping: `AFK` -> `ready-for-agent`, `HITL` -> `ready-for-human`
 
 ## Fetching Work
 
