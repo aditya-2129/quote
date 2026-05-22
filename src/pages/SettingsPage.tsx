@@ -70,7 +70,7 @@ const DEFAULT_FORM: SettingsForm = {
   featureRecognitionEnabled: false,
 };
 
-const CURRENCIES = ["INR", "USD", "EUR", "GBP"];
+const CURRENCIES = ["INR"];
 
 const SETTINGS_NAV = [
   { id: "general", label: "General", icon: SlidersHorizontal },
@@ -92,8 +92,8 @@ function booleanSetting(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function unitSystemSetting(value: unknown): SettingsForm["unitSystem"] {
-  return value === "imperial" ? "imperial" : "metric";
+function unitSystemSetting(_value: unknown): SettingsForm["unitSystem"] {
+  return "metric";
 }
 
 function formFromSettings(settings: Partial<Record<AppSettingKey, unknown>>): SettingsForm {
@@ -503,7 +503,6 @@ function GeneralSettings({
           </div>
           <div className="settings-radio-group">
             <label><input type="radio" checked={form.unitSystem === "metric"} onChange={() => set({ unitSystem: "metric" })} />Metric</label>
-            <label><input type="radio" checked={form.unitSystem === "imperial"} onChange={() => set({ unitSystem: "imperial" })} />Imperial</label>
           </div>
         </div>
 
